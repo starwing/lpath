@@ -68,57 +68,6 @@ static char *pb_prepbuffsize(PathBuffer *b, size_t len) {
 typedef struct DirData DirData;
 
 
-static int joinpath_impl(lua_State *L, int pathsep) {
-    luaL_Buffer b;
-    int i, top = lua_gettop(L);
-    luaL_buffinit(L, &b);
-    for (i = 1; i <= top; ++i) {
-        size_t len;
-        const char *s = luaL_checklstring(L, i, &len);
-        if (i != 1)
-            luaL_addchar(&b, pathsep);
-        while (s[len - 1] == pathsep)
-            --len;
-        luaL_addlstring(&b, s, len);
-    }
-    luaL_pushresult(&b);
-    return 1;
-}
-
-static int splitext_impl(lua_State *L, int extsep) {
-    size_t len;
-    const char *fname = luaL_checklstring(L, 1, &len);
-    const char *last = &fname[len];
-    while (fname < last && *--last != extsep)
-        ;
-    if (fname < last) {
-        lua_pushlstring(L, fname, last - fname);
-        lua_pushstring(L, last);
-    }
-    else {
-        lua_pushvalue(L, 1);
-        lua_pushliteral(L, "");
-    }
-    return 2;
-}
-
-#if 0
-static int splitpath_tostack(lua_State *L, const char *s, int pathsep) {
-    int t = lua_gettop(L);
-    const char *lasts = s;
-    for (; *s != '\0'; ++s) {
-        if ((*s == ALT_SEP || *s == pathsep) && s != lasts) {
-            luaL_checkstack(L, 1, "no more room for path");
-            lua_pushlstring(L, lasts, s - lasts);
-            lasts = s + 1;
-        }
-    }
-    luaL_checkstack(L, 1, "no more room for path");
-    lua_pushlstring(L, lasts, s - lasts);
-    return lua_gettop(L) - t;
-}
-#endif
-
 static size_t trimpath(char *s, int *isabs, int pathsep, int altsep) {
     char *wp = s, *rp = s;
     for (; *rp != '\0'; ++rp) {
@@ -185,6 +134,21 @@ static int normpath_impl(lua_State *L, const char *s, int pathsep) {
 }
 
 #if 0
+static int splitpath_tostack(lua_State *L, const char *s, int pathsep) {
+    int t = lua_gettop(L);
+    const char *lasts = s;
+    for (; *s != '\0'; ++s) {
+        if ((*s == ALT_SEP || *s == pathsep) && s != lasts) {
+            luaL_checkstack(L, 1, "no more room for path");
+            lua_pushlstring(L, lasts, s - lasts);
+            lasts = s + 1;
+        }
+    }
+    luaL_checkstack(L, 1, "no more room for path");
+    lua_pushlstring(L, lasts, s - lasts);
+    return lua_gettop(L) - t;
+}
+
 static int normpath_impl(lua_State *L, const char *s, int pathsep) {
     int first = lua_gettop(L) + 1;
     int last = first + splitpath_tostack(L, s, pathsep) - 1;
@@ -435,9 +399,6 @@ static int Lnormpath(lua_State *L) {
 #endif
 
 
-static int Ljoinpath(lua_State *L) { return joinpath_impl(L, PATH_SEP); }
-static int Lsplitext(lua_State *L) { return splitext_impl(L, EXT_SEP); }
-
 static int Labspath(lua_State *L) {
     const char *fname = luaL_checkstring(L, 1);
     if (!push_abspath(L, fname, NULL))
@@ -456,6 +417,70 @@ static int Lrelpath(lua_State *L) {
     else
         lua_pushstring(L, fn);
     return 1;
+}
+
+static int Ljoinpath(lua_State *L) {
+    luaL_Buffer b;
+    int i, top = lua_gettop(L);
+    luaL_buffinit(L, &b);
+    for (i = 1; i <= top; ++i) {
+        size_t len;
+        const char *s = luaL_checklstring(L, i, &len);
+        if (i != 1)
+            luaL_addchar(&b, PATH_SEP);
+        while (s[len - 1] == PATH_SEP)
+            --len;
+        luaL_addlstring(&b, s, len);
+    }
+    luaL_pushresult(&b);
+    return 1;
+}
+
+static int iterpath_helper(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    int p = lua_tointeger(L, lua_upvalueindex(1));
+    if (p == 0 && s[0] == PATH_SEP) {
+        char root[] = { PATH_SEP, '\0' };
+        lua_pushinteger(L, p + 1);
+        lua_replace(L, lua_upvalueindex(1));
+        lua_pushstring(L, root);
+    }
+    else {
+        int pend = p;
+        while (s[pend] != '\0' && s[pend] != PATH_SEP)
+            ++pend;
+        if (pend == p) return 0;
+        lua_pushinteger(L, pend + 1);
+        lua_replace(L, lua_upvalueindex(1));
+        lua_pushlstring(L, &s[p], pend - p);
+    }
+    return 1;
+}
+
+static int Literpath(lua_State *L) {
+    size_t len;
+    const char *s = luaL_checklstring(L, 1, &len);
+    lua_pushinteger(L, 0);
+    lua_pushcclosure(L, iterpath_helper, 1);
+    normpath_impl(L, s, PATH_SEP);
+    return 2;
+}
+
+static int Lsplitext(lua_State *L) {
+    size_t len;
+    const char *fname = luaL_checklstring(L, 1, &len);
+    const char *last = &fname[len];
+    while (fname < last && *--last != EXT_SEP)
+        ;
+    if (fname < last) {
+        lua_pushlstring(L, fname, last - fname);
+        lua_pushstring(L, last);
+    }
+    else {
+        lua_pushvalue(L, 1);
+        lua_pushliteral(L, "");
+    }
+    return 2;
 }
 
 #if 0
@@ -517,12 +542,13 @@ static int Ldir(lua_State *L) {
     return dir_open(L, d, s);
 }
 
-
 static luaL_Reg libs[] = {
 #define ENTRY(n) { #n, L##n }
     ENTRY(exists),
     ENTRY(getcwd),
     ENTRY(chdir),
+ /* ENTRY(mkdir), */
+ /* ENTRY(rmdir), */
     ENTRY(filetime),
     ENTRY(filesize),
     ENTRY(isdir),
@@ -533,6 +559,7 @@ static luaL_Reg libs[] = {
     ENTRY(relpath),
     ENTRY(splitpath),
     ENTRY(splitext),
+    ENTRY(iterpath),
     ENTRY(dir),
 #undef  ENTRY
     { NULL, NULL }
