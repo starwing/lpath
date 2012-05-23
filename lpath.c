@@ -119,49 +119,57 @@ static int splitpath_tostack(lua_State *L, const char *s, int pathsep) {
 }
 #endif
 
-static size_t normpath_inplace(char *s, int pathsep) {
+static size_t trimpath(char *s, int *isabs, int pathsep, int altsep) {
     char *wp = s, *rp = s;
-    char *lastwp = s;
-#define ISSEP(s) ((s) == ALT_SEP || (s) == pathsep)
-    int isabs = ISSEP(*s);
-    while (*rp != '\0') {
-        assert(lastwp == s || *lastwp == '\\');
-        if (ISSEP(*rp)) {
-            while (ISSEP(rp[1])) ++rp;
-            if (rp[1] == '.' && (ISSEP(rp[2]) || rp[2] == '\0')) {
-                rp += 2;
-                continue;  /* skip './' */
-            }
-            if (rp[1] == '.' && rp[2] == '.' && (ISSEP(rp[3]) || rp[3] == '\0')) {
-                /* if has preious componment and is not '..' */
-                if (wp != lastwp && ((wp - 3 != s && !ISSEP(wp[-3])) ||
-                                     wp[-2] != '.' || wp[-1] != '.')) {
-                    wp = lastwp;
-                    while (s < lastwp && (--lastwp, !ISSEP(*lastwp)))
-                        ;
-                    rp += 3;
-                    continue; /* skip previous componment and '..' */
-                }
-                /* if wp is first componment, and is absolute path */
-                else if (lastwp == s && isabs) {
-                    rp += 3;
-                    continue;  /* skip '..' */
-                }
-            }
-            if (wp != s || isabs) {
-                lastwp = wp;
-                *wp++ = pathsep;
-            }
-            ++rp;
+    for (; *rp != '\0'; ++rp) {
+        if (*rp == altsep || *rp == pathsep) {
+            while (rp[1] == altsep || rp[1] == pathsep) ++rp;
+            if (rp[1] == '.'
+                    && (rp[2] == altsep || rp[2] == pathsep || rp[2] == '\0'))
+                ++rp;
+            else *wp++ = pathsep;
         }
-        else *wp++ = *rp++;
+        else *wp++ = *rp;
     }
-    if (wp == s) {
-        *wp++ = '.';
-        if (ISSEP(rp[-1])) *wp++ = pathsep;
-    }
+    if (s < wp && wp[-1] == '.' && wp[-2] == '.' &&
+            (wp - 2 == s || wp[-3] == pathsep))
+        *wp++ = pathsep;
     *wp = '\0';
-#undef ISSEP
+    if (isabs != NULL) *isabs = *s == pathsep;
+    return wp - s;
+}
+
+static size_t normpath_inplace(char *s, int pathsep) {
+    int isabs;
+    char *wp = s, *rp = s;
+    trimpath(s, &isabs, pathsep, ALT_SEP);
+    for (; *rp != '\0'; ++rp) {
+        /*while (*rp != '\0' && *rp != pathsep) *wp++ = *rp++;*/
+        /*if (*rp == '\0') break;*/
+        if (rp[0] == pathsep && rp[1] == '.' && rp[2] == '.'
+                && (rp[3] == pathsep || rp[3] == '\0')) {
+            char *lastwp = wp;
+            while (s < lastwp && *--lastwp != pathsep)
+                ;
+            if (lastwp != wp && (wp[-1] != '.' || wp[-2] != '.' ||
+                                 (s < wp - 3 && wp[-3] != pathsep))) {
+                wp = lastwp;
+                rp += 2;
+                continue;
+            }
+            else if (lastwp == s && isabs) {
+                rp += 2;
+                continue;
+            }
+        }
+        if (rp[0] != pathsep || wp != s || isabs)
+            *wp++ = *rp;
+    }
+    if (wp == s)
+        *wp++ = isabs ? pathsep : '.';
+    if (wp == s + 1 && s[0] == '.')
+        *wp++ = pathsep;
+    *wp = '\0';
     return wp - s;
 }
 
