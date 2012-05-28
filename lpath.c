@@ -223,7 +223,7 @@ static void to_filetime(lua_Number number, PFILETIME pft) {
 
 struct DirData {
     HANDLE hFile;
-    WIN32_FIND_DATA wfd;
+    WIN32_FIND_DATAA wfd;
     DWORD lasterror;
 };
 
@@ -257,7 +257,7 @@ static int dir_iter(lua_State *L) {
     push_filetime(L, &d->wfd.ftCreationTime);
     push_filetime(L, &d->wfd.ftLastAccessTime);
     push_filetime(L, &d->wfd.ftLastWriteTime);
-    if (!FindNextFile(d->hFile, &d->wfd)) {
+    if (!FindNextFileA(d->hFile, &d->wfd)) {
         d->lasterror = GetLastError();
     }
     return 6;
@@ -266,7 +266,7 @@ static int dir_iter(lua_State *L) {
 static int dir_impl(lua_State *L, DirData *d, const char *s) {
     const char *pattern = lua_pushfstring(L, "%s%c*", s, PATH_SEP);
     HANDLE hFile;
-    if ((hFile = FindFirstFile(pattern, &d->wfd)) == INVALID_HANDLE_VALUE) {
+    if ((hFile = FindFirstFileA(pattern, &d->wfd)) == INVALID_HANDLE_VALUE) {
         push_lasterror(L);
         return lua_error(L);
     }
@@ -284,7 +284,7 @@ static int chdir_impl(lua_State *L, const char *s) {
 }
 
 static int mkdir_impl(lua_State *L, const char *s) {
-    if (!CreateDirectory(s, NULL)) {
+    if (!CreateDirectoryA(s, NULL)) {
         DWORD lasterror = GetLastError();
         if (lasterror == ERROR_ALREADY_EXISTS)
             return 0;
@@ -294,13 +294,13 @@ static int mkdir_impl(lua_State *L, const char *s) {
 }
 
 static int rmdir_impl(lua_State *L, const char *s) {
-    if (!RemoveDirectory(s))
+    if (!RemoveDirectoryA(s))
         return push_lasterror(L);
     return 0;
 }
 
 static int remove_impl(lua_State *L, const char *s) {
-    if (!DeleteFile(s))
+    if (!DeleteFileA(s))
         return push_lasterror(L);
     return 0;
 }
@@ -330,7 +330,7 @@ static int walkpath_impl(lua_State *L, const char *s, WalkFunc *walk) {
     HANDLE hFile;
     int nrets = 0;
     if (chdir_impl(L, s) != 0) return 2;
-    if ((hFile = FindFirstFile("*", &wfd)) == INVALID_HANDLE_VALUE) {
+    if ((hFile = FindFirstFileA("*", &wfd)) == INVALID_HANDLE_VALUE) {
         return push_lasterror(L);
     }
     do {
@@ -384,7 +384,7 @@ static int Lexists(lua_State *L) {
     WIN32_FIND_DATA wfd;
     const char *s = luaL_checkstring(L, 1);
     HANDLE hFile;
-    if ((hFile = FindFirstFile(s, &wfd)) == INVALID_HANDLE_VALUE)
+    if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
     lua_pushstring(L, wfd.cFileName);
     return 1;
@@ -394,7 +394,7 @@ static int Lfiletime(lua_State *L) {
     WIN32_FIND_DATA wfd;
     const char *s = luaL_checkstring(L, 1);
     HANDLE hFile;
-    if ((hFile = FindFirstFile(s, &wfd)) == INVALID_HANDLE_VALUE)
+    if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
     push_filetime(L, &wfd.ftCreationTime);
     push_filetime(L, &wfd.ftLastAccessTime);
@@ -406,7 +406,7 @@ static int Lfilesize(lua_State *L) {
     WIN32_FIND_DATA wfd;
     const char *s = luaL_checkstring(L, 1);
     HANDLE hFile;
-    if ((hFile = FindFirstFile(s, &wfd)) == INVALID_HANDLE_VALUE)
+    if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
     push_word64(L, wfd.nFileSizeLow, wfd.nFileSizeHigh);
     return 1;
@@ -417,8 +417,8 @@ static int Lcmptime(lua_State *L) {
     const char *f1 = luaL_checkstring(L, 1);
     const char *f2 = luaL_checkstring(L, 1);
     HANDLE hFile1, hFile2;
-    if ((hFile1 = FindFirstFile(f1, &wfd1)) == INVALID_HANDLE_VALUE ||
-            (hFile2 = FindFirstFile(f2, &wfd2)) == INVALID_HANDLE_VALUE)
+    if ((hFile1 = FindFirstFileA(f1, &wfd1)) == INVALID_HANDLE_VALUE ||
+            (hFile2 = FindFirstFileA(f2, &wfd2)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
     lua_pushinteger(L, CompareFileTime(&wfd1.ftCreationTime,
                                        &wfd2.ftCreationTime));
@@ -434,7 +434,7 @@ static int Ltouch(lua_State *L) {
     BOOL success;
     FILETIME at, mt;
     SYSTEMTIME st;
-    HANDLE hFile = CreateFile(
+    HANDLE hFile = CreateFileA(
             s,                     /* filepath */
             FILE_WRITE_ATTRIBUTES, /* desired rights */
             0,                     /* shared mode */
@@ -830,6 +830,6 @@ LUALIB_API int luaopen_path(lua_State *L) {
 }
 
 /*
- * cc: flags+='-ggdb -pedantic -mdll -DLUA_BUILD_AS_DLL' libs+='lua52.dll'
+ * cc: flags+='-ggdb -pedantic -mdll -DLUA_BUILD_AS_DLL' libs+='d:/lua52/lua52.dll'
  * cc: output='path.dll' run='lua test.lua'
  */
