@@ -354,6 +354,15 @@ static int walkpath_impl(lua_State *L, const char *s, WalkFunc *walk) {
     return 0;
 }
 
+static int Lsetenv(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    const char *value = luaL_optstring(L, 2, NULL);
+    if (!SetEnvironmentVariableA(name, value))
+        return push_lasterror(L);
+    lua_settop(L, 1);
+    return 1;
+}
+
 static int Lgetcwd(lua_State *L) {
     DWORD len;
     PathBuffer b;
@@ -553,8 +562,7 @@ static int dir_impl(lua_State *L, DirData *d, const char *s) {
 #define PLAT "unknown"
 
 struct DirData {
-    int is_rec;
-    union { lua_State *L1; } h;
+    int dummy;
 };
 
 static int LNYI(lua_State *L) {
@@ -563,19 +571,21 @@ static int LNYI(lua_State *L) {
     return 2;
 }
 
-#define NYI_impl(n,a) static int n##_impl a { return LNYI(L); }
-NYI(dir,      (lua_State *L, DirData *d, const char *s));
-NYI(chdir,    (lua_State *L, const char *s));
-NYI(mkdir,    (lua_State *L, const char *s));
-NYI(rmdir,    (lua_State *L, const char *s));
-NYI(remove,   (lua_State *L, const char *s));
-NYI(abspath,  (lua_State *L, const char *s, size_t *plen));
-NYI(walkpath, (lua_State *L, const char *s, WalkFunc *walk));
+#define NYI_impl(n,arg) static int n##_impl arg { return LNYI(L); }
+NYI_impl(dir,      (lua_State *L, DirData *d, const char *s))
+NYI_impl(chdir,    (lua_State *L, const char *s))
+NYI_impl(mkdir,    (lua_State *L, const char *s))
+NYI_impl(rmdir,    (lua_State *L, const char *s))
+NYI_impl(remove,   (lua_State *L, const char *s))
+NYI_impl(abspath,  (lua_State *L, const char *s, size_t *plen))
+NYI_impl(walkpath, (lua_State *L, const char *s, WalkFunc *walk))
 #undef NYI_impl
 
 #define Ldir_gc         LNYI
 #define Lexists         LNYI
 #define Lgetcwd         LNYI
+#define Lsetenv         LNYI
+#define Ltouch          LNYI
 #define Lfiletime       LNYI
 #define Lfilesize       LNYI
 #define Lisdir          LNYI
@@ -793,27 +803,17 @@ static int Lwalkpath(lua_State *L) {
 
 static luaL_Reg libs[] = {
 #define ENTRY(n) { #n, L##n }
-    ENTRY(dir),
-    ENTRY(isdir),
-    ENTRY(chdir),
-    ENTRY(mkdir),
-    ENTRY(rmdir),
-    ENTRY(mkdir_rec),
-    ENTRY(rmdir_rec),
-    ENTRY(exists),
-    ENTRY(getcwd),
-    ENTRY(filetime),
-    ENTRY(filesize),
-    ENTRY(cmptime),
-    ENTRY(touch),
-    ENTRY(abspath),
-    ENTRY(relpath),
-    ENTRY(normpath),
-    ENTRY(joinpath),
-    ENTRY(splitpath),
-    ENTRY(splitext),
-    ENTRY(iterpath),
-    ENTRY(walkpath),
+    ENTRY(dir),       ENTRY(filesize),
+    ENTRY(isdir),     ENTRY(cmptime),
+    ENTRY(chdir),     ENTRY(touch),
+    ENTRY(mkdir),     ENTRY(abspath),
+    ENTRY(rmdir),     ENTRY(relpath),
+    ENTRY(mkdir_rec), ENTRY(normpath),
+    ENTRY(rmdir_rec), ENTRY(joinpath),
+    ENTRY(exists),    ENTRY(splitpath),
+    ENTRY(getcwd),    ENTRY(splitext),
+    ENTRY(setenv),    ENTRY(iterpath),
+    ENTRY(filetime),  ENTRY(walkpath),
 #undef  ENTRY
     { NULL, NULL }
 };
