@@ -21,9 +21,10 @@
 #include <stdlib.h>
 
 typedef struct PathBuffer {
-    r *p;
-    char buf[PB_BUFFERSIZE];
+    char *p;
     lua_State *L;
+    size_t len;
+    char buf[PB_BUFFERSIZE];
 } PathBuffer;
 
 static void pb_buffinit(lua_State *L, PathBuffer *b) {
@@ -459,6 +460,7 @@ LUALIB_API int luaopen_path(lua_State *L) {
 /*
  * linuxcc: flags+='-O2 -shared'
  * linuxcc: output='path.so' run='lua test.lua'
- * cc: flags+='-ggdb -pedantic -mdll -DLUA_BUILD_AS_DLL' libs+='d:/lua52/lua52.dll'
+ * cc: lua='lua51' libs+='d:/lua51/lua51.dll'
+ * cc: flags+='-ggdb -pedantic -mdll -DLUA_BUILD_AS_DLL -Id:/$lua/include'
  * cc: output='path.dll' run='lua test.lua'
  */
