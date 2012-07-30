@@ -37,9 +37,11 @@ static int Ldir_gc(lua_State *L) {
 }
 
 static int dir_iter(lua_State *L) {
-    DirData *d = lua_touserdata(L, lua_upvalueindex(1));
+    DirData *d = lua_touserdata(L, 1);
     struct dirent *dir;
+    assert(d != NULL);
     if (d->closed) return 0;
+redo:
     errno = 0;
     dir = readdir(d->dir);
     if (dir == NULL) {
@@ -50,6 +52,9 @@ static int dir_iter(lua_State *L) {
         push_posixerror(L, errno);
         return lua_error(L);
     }
+    if (!strcmp(dir->d_name, CUR_PATH) ||
+            !strcmp(dir->d_name, PAR_PATH))
+        goto redo;
     lua_pushstring(L, dir->d_name);
     return 1;
 }
@@ -60,8 +65,9 @@ static int dir_impl(lua_State *L, DirData *d, const char *s) {
         return lua_error(L);
     }
     d->closed = 0;
-    lua_pushcclosure(L, dir_iter, 1);
-    return 1;
+    lua_pushcfunction(L, dir_iter);
+    lua_insert(L, -2);
+    return 2;
 }
 
 static int chdir_impl(lua_State *L, const char *s) {
@@ -146,7 +152,7 @@ static int walkpath_impl(lua_State *L, const char *s, WalkFunc *walk) {
 }
 
 static int Lexists(lua_State *L) {
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     if (access(s, F_OK) != 0)
         return push_lasterror(L);
     return abspath_impl(L, s, NULL);
@@ -169,14 +175,14 @@ static int Lsetenv(lua_State *L) {
 }
 
 static int Ltouch(lua_State *L) {
-    const char *file = luaL_checkstring (L, 1);
+    const char *file = luaL_checkstring(L, 1);
     struct utimbuf utb, *buf;
 
-    if (lua_gettop (L) == 1) /* set to current date/time */
+    if (lua_gettop(L) == 1) /* set to current date/time */
         buf = NULL;
     else {
-        utb.actime = (time_t)luaL_optnumber (L, 2, time(NULL));
-        utb.modtime = (time_t)luaL_optnumber (L, 3, utb.actime);
+        utb.actime = (time_t)luaL_optnumber(L, 2, time(NULL));
+        utb.modtime = (time_t)luaL_optnumber(L, 3, utb.actime);
         buf = &utb;
     }
     if (utime(file, buf) != 0)
@@ -186,7 +192,7 @@ static int Ltouch(lua_State *L) {
 
 static int Lfiletime(lua_State *L) {
     struct stat buf;
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     if (stat(s, &buf) != 0)
         return push_lasterror(L);
     lua_pushnumber(L, buf.st_ctime);
@@ -197,7 +203,7 @@ static int Lfiletime(lua_State *L) {
 
 static int Lfilesize(lua_State *L) {
     struct stat buf;
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     if (stat(s, &buf) != 0)
         return push_lasterror(L);
     lua_pushnumber(L, buf.st_size);
@@ -206,7 +212,7 @@ static int Lfilesize(lua_State *L) {
 
 static int Lisdir(lua_State *L) {
     struct stat buf;
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     if (stat(s, &buf) != 0)
         return push_lasterror(L);
     lua_pushboolean(L, S_ISDIR(buf.st_mode));
@@ -227,7 +233,7 @@ static int Lcmptime(lua_State *L) {
 }
 
 static int Lnormpath(lua_State *L) {
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     while (isspace(*s)) ++s;
     return normpath_impl(L, s, '/');
 }

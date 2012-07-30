@@ -17,6 +17,7 @@
 #  define pb_pushresult   luaL_pushresult
 #else
 #  define LUA_OK 0
+#  define lua_rawlen      lua_objlen
 
 #include <stdlib.h>
 
@@ -77,6 +78,7 @@ typedef int WalkFunc(lua_State *L, const char *s, int isdir);
 
 /* path algorithms */
 
+#include <assert.h>
 #include <string.h>
 
 static size_t trimpath(char *s, int *isabs, int pathsep, int altsep) {
@@ -179,6 +181,35 @@ static int relpath_impl(lua_State *L, const char *fn, const char *path, int path
     return 1;
 }
 
+static int Ljoinpath(lua_State *L) {
+    luaL_Buffer b;
+    int i, top = lua_gettop(L);
+    luaL_buffinit(L, &b);
+    for (i = 1; i <= top; ++i) {
+        size_t len;
+        const char *s = luaL_checklstring(L, i, &len);
+        if (i != 1)
+            luaL_addchar(&b, PATH_SEP);
+        while (s[len - 1] == PATH_SEP)
+            --len;
+        luaL_addlstring(&b, s, len);
+    }
+    luaL_pushresult(&b);
+    return 1;
+}
+
+static const char *get_single_pathname(lua_State *L) {
+    int top = lua_gettop(L);
+    if (top == 0)
+        return ".";
+    if (top > 1) {
+        Ljoinpath(L);
+        lua_replace(L, 1);
+        lua_settop(L, 1);
+    }
+    return luaL_checkstring(L, 1);
+}
+
 /* system specfied routines */
 
 #define first_arg(L) (lua_settop((L), 1), 1)
@@ -227,8 +258,7 @@ NYI_impl(walkpath, (lua_State *L, const char *s, WalkFunc *walk))
 /* common routines */
 
 static int Labspath(lua_State *L) {
-    const char *fname = luaL_checkstring(L, 1);
-    return abspath_impl(L, fname, NULL);
+    return abspath_impl(L, get_single_pathname(L), NULL);
 }
 
 static int Lrelpath(lua_State *L) {
@@ -239,23 +269,6 @@ static int Lrelpath(lua_State *L) {
     fn = lua_tostring(L, -2);
     path = lua_tostring(L, -1);
     return relpath_impl(L, fn, path, PATH_SEP);
-}
-
-static int Ljoinpath(lua_State *L) {
-    luaL_Buffer b;
-    int i, top = lua_gettop(L);
-    luaL_buffinit(L, &b);
-    for (i = 1; i <= top; ++i) {
-        size_t len;
-        const char *s = luaL_checklstring(L, i, &len);
-        if (i != 1)
-            luaL_addchar(&b, PATH_SEP);
-        while (s[len - 1] == PATH_SEP)
-            --len;
-        luaL_addlstring(&b, s, len);
-    }
-    luaL_pushresult(&b);
-    return 1;
 }
 
 static int Lsplitext(lua_State *L) {
@@ -276,7 +289,7 @@ static int Lsplitext(lua_State *L) {
 }
 
 static int Lsplitpath(lua_State *L) {
-    const char *fname = luaL_checkstring(L, 1);
+    const char *fname = get_single_pathname(L);
     size_t pos = 0;
     int top = lua_gettop(L);
     abspath_impl(L, fname, &pos);
@@ -288,8 +301,7 @@ static int Lsplitpath(lua_State *L) {
 }
 
 static int unary_func(lua_State *L, int (*f)(lua_State *, const char *)) {
-    const char *s = luaL_checkstring(L, 1);
-    if (f(L, s) != 0)
+    if (f(L, get_single_pathname(L)) != 0)
         return 2;
     return first_arg(L);
 }
@@ -299,7 +311,7 @@ static int Lmkdir(lua_State *L) { return unary_func(L, mkdir_impl); }
 static int Lrmdir(lua_State *L) { return unary_func(L, rmdir_impl); }
 
 static int Lmkdir_rec(lua_State *L) {
-    const char *p, *s = luaL_checkstring(L, 1);
+    const char *p, *s = get_single_pathname(L);
     int top = lua_gettop(L);
     if (Lgetcwd(L) != 1) return 2;
     if (normpath_impl(L, s, PATH_SEP) != 1) return 2;
@@ -327,7 +339,7 @@ static int rmdir_rec_walk(lua_State *L, const char *s, int isdir) {
 }
 
 static int Lrmdir_rec(lua_State *L) {
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     int res;
     if (Lgetcwd(L) != 1) return 2;
     res = walkpath_impl(L, s, rmdir_rec_walk);
@@ -347,13 +359,14 @@ static DirData *dirdata_new(lua_State *L) {
 }
 
 static int Ldir(lua_State *L) {
-    const char *s = luaL_optstring(L, 1, ".");
+    const char *s = get_single_pathname(L);
     return dir_impl(L, dirdata_new(L), s);
 }
 
 static int iterpath_iter(lua_State *L) {
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = lua_tostring(L, 1);
     int p = lua_tointeger(L, lua_upvalueindex(1));
+    assert(s != NULL);
     if (p == 0 && s[0] == PATH_SEP) {
         char root[] = { PATH_SEP, '\0' };
         lua_pushinteger(L, p + 1);
@@ -382,49 +395,52 @@ static int Literpath(lua_State *L) {
 }
 
 static int walkpath_iter(lua_State *L) {
-    lua_State *L1 = lua_tothread(L, lua_upvalueindex(1));
-    int nrets, top = lua_gettop(L1);
     const char *path;
+    int nrets, stacktop = lua_rawlen(L, 1);
 redo:
-    if (top == 0) return 0;
-    lua_pushvalue(L1, -1);
-    if (lua_pcall(L1, 0, LUA_MULTRET, 0) != LUA_OK) {
-        lua_xmove(L1, L, 1);
-        return lua_error(L);
-    }
-    if ((nrets = lua_gettop(L1) - top) == 0) {
-        lua_settop(L1, top -= 2);
+    lua_settop(L, 1);
+    if (stacktop == 0) return 0;
+    lua_rawgeti(L, 1, stacktop-1); /* 2 */
+    lua_rawgeti(L, 1, stacktop); /* 3 */
+    lua_call(L, 1, LUA_MULTRET); /* 2,3->? */
+    if ((nrets = lua_gettop(L) - 1) == 0) {
+        lua_settop(L, 6); /* 4 */
+        lua_rawseti(L, 1, stacktop-2); /* 4->1 */
+        lua_rawseti(L, 1, stacktop-1); /* 3->1 */
+        lua_rawseti(L, 1, stacktop); /* 2->1 */
+        stacktop -= 3;
         goto redo; /* tail return walkpath_iter(L); */
     }
-    path = lua_tostring(L1, top + 1);
-    if (!strcmp(path, CUR_PATH) || !strcmp(path, PAR_PATH)) {
-        lua_settop(L1, top);
+    path = lua_tostring(L, 2);
+    if (!strcmp(path, CUR_PATH) || !strcmp(path, PAR_PATH))
         goto redo; /* tail return walkpath_iter(L); */
-    }
-    lua_pushvalue(L1, top - 1);
-    lua_pushvalue(L1, top + 1);
-    lua_concat(L1, 2);
-    lua_replace(L1, top + 1);
+    lua_rawgeti(L, 1, stacktop-2);
+    lua_pushvalue(L, 2);
+    lua_concat(L, 2);
+    lua_replace(L, 2);
     /* the second return value is "file" or "dir" */
-    if (*lua_tostring(L1, top + 2) == 'd') {
-        lua_pushfstring(L1, "%s%c", lua_tostring(L1, top + 1), PATH_SEP);
-        lua_insert(L1, top + 1);
-        path = lua_tostring(L1, top + 1);
-        lua_xmove(L, L1, dir_impl(L, dirdata_new(L), path));
-        lua_insert(L1, top + 2);
+    if (*lua_tostring(L, 3) == 'd') {
+        lua_pushfstring(L, "%s%c", lua_tostring(L, 2), PATH_SEP);
+        path = lua_tostring(L, -1);
+        lua_rawseti(L, 1, stacktop+1);
+        lua_pushnil(L); lua_rawseti(L, 1, stacktop+2); /* place holder, avoid hash part */
+        dir_impl(L, dirdata_new(L), path);
+        lua_rawseti(L, 1, stacktop+3);
+        lua_rawseti(L, 1, stacktop+2);
     }
-    lua_xmove(L1, L, nrets);
     return nrets;
 }
 
 static int Lwalkpath(lua_State *L) {
-    const char *s = luaL_optstring(L, 1, ".");
-    lua_State *L1;
-    L1 = lua_newthread(L);
-    lua_pushliteral(L1, "");
-    dir_impl(L1, dirdata_new(L1), s);
-    lua_pushcclosure(L, walkpath_iter, 1);
-    return 1;
+    const char *s = get_single_pathname(L);
+    lua_pushcfunction(L, walkpath_iter);
+    lua_createtable(L, 3, 0);
+    lua_pushfstring(L, "%s%c", s, PATH_SEP);
+    dir_impl(L, dirdata_new(L), s);
+    lua_rawseti(L, -4, 3);
+    lua_rawseti(L, -3, 2);
+    lua_rawseti(L, -2, 1);
+    return 2;
 }
 
 /* register functions */
@@ -460,7 +476,7 @@ LUALIB_API int luaopen_path(lua_State *L) {
 /*
  * linuxcc: flags+='-O2 -shared'
  * linuxcc: output='path.so' run='lua test.lua'
- * cc: lua='lua51' libs+='d:/lua51/lua51.dll'
+ * cc: lua='lua52' libs+='d:/$lua/$lua.dll'
  * cc: flags+='-ggdb -pedantic -mdll -DLUA_BUILD_AS_DLL -Id:/$lua/include'
  * cc: output='path.dll' run='lua test.lua'
  */

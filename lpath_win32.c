@@ -58,7 +58,10 @@ static int Ldir_gc(lua_State *L) {
 }
 
 static int dir_iter(lua_State *L) {
-    DirData *d = lua_touserdata(L, lua_upvalueindex(1));
+    int invalid;
+    DirData *d = lua_touserdata(L, 1);
+    assert(d != NULL);
+redo:
     if (d->lasterror == ERROR_NO_MORE_FILES) {
         dir_close(d);
         return 0;
@@ -67,16 +70,21 @@ static int dir_iter(lua_State *L) {
         push_win32error(L, d->lasterror);
         return lua_error(L);
     }
-    lua_pushstring(L, d->wfd.cFileName);
-    lua_pushstring(L, d->wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ?
-            "dir" : "file");
-    push_word64(L, d->wfd.nFileSizeLow, d->wfd.nFileSizeHigh);
-    push_filetime(L, &d->wfd.ftCreationTime);
-    push_filetime(L, &d->wfd.ftLastAccessTime);
-    push_filetime(L, &d->wfd.ftLastWriteTime);
-    if (!FindNextFileA(d->hFile, &d->wfd)) {
-        d->lasterror = GetLastError();
+    invalid = !strcmp(d->wfd.cFileName, CUR_PATH) ||
+              !strcmp(d->wfd.cFileName, PAR_PATH);
+    if (!invalid) {
+        lua_pushstring(L, d->wfd.cFileName);
+        lua_pushstring(L, d->wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ?
+                "dir" : "file");
+        push_word64(L, d->wfd.nFileSizeLow, d->wfd.nFileSizeHigh);
+        push_filetime(L, &d->wfd.ftCreationTime);
+        push_filetime(L, &d->wfd.ftLastAccessTime);
+        push_filetime(L, &d->wfd.ftLastWriteTime);
     }
+    if (!FindNextFileA(d->hFile, &d->wfd))
+        d->lasterror = GetLastError();
+    if (invalid)
+        goto redo;
     return 6;
 }
 
@@ -90,8 +98,9 @@ static int dir_impl(lua_State *L, DirData *d, const char *s) {
     lua_pop(L, 1);
     d->lasterror = NO_ERROR;
     d->hFile = hFile;
-    lua_pushcclosure(L, dir_iter, 1);
-    return 1;
+    lua_pushcfunction(L, dir_iter);
+    lua_insert(L, -2);
+    return 2;
 }
 
 static int chdir_impl(lua_State *L, const char *s) {
@@ -195,7 +204,7 @@ static int Lgetcwd(lua_State *L) {
 }
 
 static int Lisdir(lua_State *L) {
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     DWORD attrs = GetFileAttributes(s);
     if (attrs == INVALID_FILE_ATTRIBUTES)
         return push_lasterror(L);
@@ -205,7 +214,7 @@ static int Lisdir(lua_State *L) {
 
 static int Lexists(lua_State *L) {
     WIN32_FIND_DATA wfd;
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     HANDLE hFile;
     if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
@@ -215,7 +224,7 @@ static int Lexists(lua_State *L) {
 
 static int Lfiletime(lua_State *L) {
     WIN32_FIND_DATA wfd;
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     HANDLE hFile;
     if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
@@ -227,7 +236,7 @@ static int Lfiletime(lua_State *L) {
 
 static int Lfilesize(lua_State *L) {
     WIN32_FIND_DATA wfd;
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     HANDLE hFile;
     if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
@@ -288,7 +297,7 @@ static int Ltouch(lua_State *L) {
 }
 
 static int Lnormpath(lua_State *L) {
-    const char *s = luaL_checkstring(L, 1);
+    const char *s = get_single_pathname(L);
     while (isspace(*s)) ++s;
     if (!strncmp(s, "\\\\.\\", 4) || !strncmp(s, "\\\\?\\", 4)) {
         lua_settop(L, 1);
