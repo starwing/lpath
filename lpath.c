@@ -81,67 +81,65 @@ typedef int WalkFunc(lua_State *L, const char *s, int isdir);
 #include <assert.h>
 #include <string.h>
 
-static size_t trimpath(char *s, int *isabs, int pathsep, int altsep) {
-    char *wp = s, *rp = s;
-    for (; *rp != '\0'; ++rp) {
-        if (*rp == altsep || *rp == pathsep) {
-            while (rp[1] == altsep || rp[1] == pathsep) ++rp;
-            if (rp[1] == '.' &&
-                    (rp[2] == altsep || rp[2] == pathsep || rp[2] == '\0'))
-                ++rp;
-            else *wp++ = pathsep;
+#define COMP_MAX 50
+
+#define ispathsep(ch)   ((ch) == PATH_SEP || (ch) == ALT_SEP)
+#define iseos(ch)       ((ch) == '\0')
+#define ispathend(ch)   (ispathsep(ch) || iseos(ch))
+
+size_t normpath(char *out, const char *in) {
+    char *pos[COMP_MAX], **top = pos, *head = out;
+    int isabs = ispathsep(*in);
+
+    if (isabs) *out++ = '/';
+    *top++ = out;
+
+    while (!iseos(*in)) {
+        while (ispathsep(*in)) ++in;
+
+        if (iseos(*in))
+            break;
+
+        if (memcmp(in, ".", 1) == 0 && ispathend(in[1])) {
+            ++in;
+            continue;
         }
-        else *wp++ = *rp;
+
+        if (memcmp(in, "..", 2) == 0 && ispathend(in[2])) {
+            in += 2;
+            if (top != pos + 1)
+                out = *--top;
+            else if (isabs)
+                out = top[-1];
+            else {
+                strcpy(out, "../");
+                out += 3;
+            }
+            continue;
+        }
+
+        if (top - pos >= COMP_MAX)
+            return 0; /* path too complicate */
+
+        *top++ = out;
+        while (!ispathend(*in))
+            *out++ = *in++;
+        if (ispathsep(*in))
+            *out++ = '/';
     }
-    if (s < wp && wp[-1] == '.' && wp[-2] == '.' &&
-            (wp - 2 == s || wp[-3] == pathsep))
-        *wp++ = pathsep;
-    *wp = '\0';
-    if (isabs != NULL) *isabs = *s == pathsep;
-    return wp - s;
+
+    *out = '\0';
+    if (*head == '\0')
+        strcpy(head, "./");
+    return out - head;
 }
 
-static size_t normpath_inplace(char *s, int pathsep) {
-    int isabs;
-    char *wp = s, *rp = s;
-    trimpath(s, &isabs, pathsep, ALT_SEP);
-    for (; *rp != '\0'; ++rp) {
-        /*while (*rp != '\0' && *rp != pathsep) *wp++ = *rp++;*/
-        /*if (*rp == '\0') break;*/
-        if (rp[0] == pathsep && rp[1] == '.' && rp[2] == '.'
-                && (rp[3] == pathsep || rp[3] == '\0')) {
-            char *lastwp = wp;
-            while (s < lastwp && *--lastwp != pathsep)
-                ;
-            if (lastwp != wp && (wp[-1] != '.' || wp[-2] != '.' ||
-                                 (s < wp - 3 && wp[-3] != pathsep))) {
-                wp = lastwp;
-                rp += 2;
-                continue;
-            }
-            else if (lastwp == s && isabs) {
-                rp += 2;
-                continue;
-            }
-        }
-        if (rp[0] != pathsep || wp != s || isabs)
-            *wp++ = *rp;
-    }
-    if (wp == s)
-        *wp++ = isabs ? pathsep : '.';
-    if (wp == s + 1 && s[0] == '.')
-        *wp++ = pathsep;
-    *wp = '\0';
-    return wp - s;
-}
-
-static int normpath_impl(lua_State *L, const char *s, int pathsep) {
+static int normpath_impl(lua_State *L, const char *s) {
     char *buff;
     PathBuffer b;
     pb_buffinit(L, &b);
     buff = pb_prepbuffsize(&b, strlen(s) + 1);
-    strcpy(buff, s);
-    pb_addsize(&b, normpath_inplace(buff, pathsep));
+    pb_addsize(&b, normpath(buff, s));
     pb_pushresult(&b);
     return 1;
 }
@@ -264,8 +262,8 @@ static int Labspath(lua_State *L) {
 static int Lrelpath(lua_State *L) {
     const char *fn = luaL_checkstring(L, 1);
     const char *path = luaL_checkstring(L, 2);
-    normpath_impl(L, fn, PATH_SEP);
-    normpath_impl(L, path, PATH_SEP);
+    normpath_impl(L, fn);
+    normpath_impl(L, path);
     fn = lua_tostring(L, -2);
     path = lua_tostring(L, -1);
     return relpath_impl(L, fn, path, PATH_SEP);
@@ -314,7 +312,7 @@ static int Lmkdir_rec(lua_State *L) {
     const char *p, *s = get_single_pathname(L);
     int top = lua_gettop(L);
     if (Lgetcwd(L) != 1) return 2;
-    if (normpath_impl(L, s, PATH_SEP) != 1) return 2;
+    if (normpath_impl(L, s) != 1) return 2;
     lua_replace(L, 1);
     s = p = lua_tostring(L, 1);
     if (*p == PATH_SEP) ++p;
@@ -390,7 +388,7 @@ static int Literpath(lua_State *L) {
     const char *s = luaL_checklstring(L, 1, &len);
     lua_pushinteger(L, 0);
     lua_pushcclosure(L, iterpath_iter, 1);
-    normpath_impl(L, s, PATH_SEP);
+    normpath_impl(L, s);
     return 2;
 }
 

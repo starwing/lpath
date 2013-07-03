@@ -107,7 +107,8 @@ static int abspath_impl(lua_State *L, const char *s, size_t *ppos) {
             ;
         *ppos = end - buff + 1;
     }
-    return 0;
+    lua_pushstring(L, buff);
+    return 1;
 }
 
 static int walkpath_impl(lua_State *L, const char *s, WalkFunc *walk) {
@@ -160,7 +161,7 @@ static int Lexists(lua_State *L) {
 
 static int Lgetcwd(lua_State *L) {
     char buff[PATH_MAX];
-    if (getcwd(buff, PATH_MAX) != 0)
+    if (getcwd(buff, PATH_MAX) == NULL)
         return push_lasterror(L);
     lua_pushstring(L, buff);
     return 1;
@@ -177,6 +178,11 @@ static int Lsetenv(lua_State *L) {
 static int Ltouch(lua_State *L) {
     const char *file = luaL_checkstring(L, 1);
     struct utimbuf utb, *buf;
+
+    FILE *fp = fopen(file, "w");
+    if (fp == NULL)
+        return push_lasterror(L);
+    fclose(fp);
 
     if (lua_gettop(L) == 1) /* set to current date/time */
         buf = NULL;
@@ -235,5 +241,5 @@ static int Lcmptime(lua_State *L) {
 static int Lnormpath(lua_State *L) {
     const char *s = get_single_pathname(L);
     while (isspace(*s)) ++s;
-    return normpath_impl(L, s, '/');
+    return normpath_impl(L, s);
 }

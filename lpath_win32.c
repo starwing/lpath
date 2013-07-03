@@ -307,14 +307,14 @@ static int Lnormpath(lua_State *L) {
         int backslash = 0;
         while (s[backslash] == '\\') ++backslash;
         if (backslash == 0)
-            return normpath_impl(L, s, '\\');
+            return normpath_impl(L, s);
         lua_pushlstring(L, s, backslash - 1);
-        normpath_impl(L, &s[backslash - 1], '\\');
+        normpath_impl(L, &s[backslash - 1]);
         lua_concat(L, 2);
         return 1;
     }
     lua_pushfstring(L, "%c:", toupper(*s));
-    normpath_impl(L, s + 2, '\\');
+    normpath_impl(L, s + 2);
     lua_concat(L, 2);
     return 1;
 }

@@ -64,7 +64,7 @@ add_test("dir",       function ()
         local idx = 1
         for fn, ft in P.dir '.' do
             if fn == '.' or fn == '..' then goto next end
-            if ft == 'dir' then
+            if ft == 'dir' or (ft == nil and P.isdir(fn)) then
                 assert(d[idx].name == fn, "idx = "..idx..", name = "..tostring(d[idx].name)..", fn = "..fn)
                 _check(d[idx])
             else
