@@ -117,3 +117,4 @@ add_test("walkpath",  function ()
 end)
 
 for _,v in ipairs(tests) do v() end
+assert(P.rmdir_rec "test")

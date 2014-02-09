@@ -153,7 +153,7 @@ static int walkpath_impl(lua_State *L, const char *s, WalkFunc *walk) {
 }
 
 static int Lexists(lua_State *L) {
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     if (access(s, F_OK) != 0)
         return push_lasterror(L);
     return abspath_impl(L, s, NULL);
@@ -198,7 +198,7 @@ static int Ltouch(lua_State *L) {
 
 static int Lfiletime(lua_State *L) {
     struct stat buf;
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     if (stat(s, &buf) != 0)
         return push_lasterror(L);
     lua_pushnumber(L, buf.st_ctime);
@@ -209,7 +209,7 @@ static int Lfiletime(lua_State *L) {
 
 static int Lfilesize(lua_State *L) {
     struct stat buf;
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     if (stat(s, &buf) != 0)
         return push_lasterror(L);
     lua_pushnumber(L, buf.st_size);
@@ -218,7 +218,7 @@ static int Lfilesize(lua_State *L) {
 
 static int Lisdir(lua_State *L) {
     struct stat buf;
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     if (stat(s, &buf) != 0)
         return push_lasterror(L);
     lua_pushboolean(L, S_ISDIR(buf.st_mode));
@@ -239,7 +239,8 @@ static int Lcmptime(lua_State *L) {
 }
 
 static int Lnormpath(lua_State *L) {
-    const char *s = get_single_pathname(L);
+    size_t len;
+    const char *s = get_single_pathname(L, &len);
     while (isspace(*s)) ++s;
-    return normpath_impl(L, s);
+    return normpath_impl(L, s, len);
 }

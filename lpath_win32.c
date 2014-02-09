@@ -133,21 +133,25 @@ static int remove_impl(lua_State *L, const char *s) {
 
 static int abspath_impl(lua_State *L, const char *s, size_t *ppos) {
     DWORD len;
-    PathBuffer b;
-    char *pbase, *ppath;
-    pb_buffinit(L, &b);
-    if ((len = GetFullPathNameA(s, PB_BUFFERSIZE,
-                                (ppath = pb_prepbuffer(&b)), &pbase)) == 0)
-        return push_lasterror(L);
-    if (len > PB_BUFFERSIZE && GetFullPathNameA(s, PB_BUFFERSIZE,
-            (ppath = pb_prepbuffsize(&b, len)),
-            &pbase) != len) {
-        pb_pushresult(&b);
+    luaL_Buffer b;
+    char *buff, *pbase, *ppath;
+    luaL_buffinit(L, &b);
+    len = GetFullPathNameA(s, LUAL_BUFFERSIZE,
+            (ppath = luaL_prepbuffer(&b)), &pbase);
+    if (len == 0) return push_lasterror(L);
+    if (len < LUAL_BUFFERSIZE) {
+        luaL_addsize(&b, len);
+        luaL_pushresult(&b);
+        return 1;
+    }
+    buff = (char*)lua_newuserdata(L, len+1);
+    if (GetFullPathNameA(s, len+1, buff, &pbase) != len) {
+        luaL_pushresult(&b);
+        lua_pop(L, 1);
         return push_lasterror(L);
     }
-    if (ppos != NULL) *ppos = pbase - ppath;
-    pb_addsize(&b, len);
-    pb_pushresult(&b);
+    luaL_addlstring(&b, buff, len);
+    luaL_pushresult(&b);
     return 1;
 }
 
@@ -188,23 +192,29 @@ static int Lsetenv(lua_State *L) {
 
 static int Lgetcwd(lua_State *L) {
     DWORD len;
-    PathBuffer b;
-    pb_buffinit(L, &b);
-    if ((len = GetCurrentDirectoryA(PB_BUFFERSIZE, pb_prepbuffer(&b))) == 0)
-        return push_lasterror(L);
-    if (len > PB_BUFFERSIZE && GetCurrentDirectoryA(len,
-            pb_prepbuffsize(&b, len)) != len) {
-        pb_pushresult(&b);
+    luaL_Buffer b;
+    char *buff;
+    luaL_buffinit(L, &b);
+    len = GetCurrentDirectoryA(LUAL_BUFFERSIZE, luaL_prepbuffer(&b));
+    if (len == 0) return push_lasterror(L);
+    if (len <= LUAL_BUFFERSIZE) {
+        luaL_addsize(&b, len);
+        luaL_pushresult(&b);
+        return 1;
+    }
+    buff = (char*)lua_newuserdata(L, len+1);
+    if (GetCurrentDirectoryA(len+1, buff) != len) {
+        luaL_pushresult(&b);
         lua_pop(L, 1);
         return push_lasterror(L);
     }
-    pb_addsize(&b, len);
-    pb_pushresult(&b);
+    luaL_addlstring(&b, buff, len);
+    luaL_pushresult(&b);
     return 1;
 }
 
 static int Lisdir(lua_State *L) {
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     DWORD attrs = GetFileAttributes(s);
     if (attrs == INVALID_FILE_ATTRIBUTES)
         return push_lasterror(L);
@@ -214,7 +224,7 @@ static int Lisdir(lua_State *L) {
 
 static int Lexists(lua_State *L) {
     WIN32_FIND_DATA wfd;
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     HANDLE hFile;
     if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
@@ -224,7 +234,7 @@ static int Lexists(lua_State *L) {
 
 static int Lfiletime(lua_State *L) {
     WIN32_FIND_DATA wfd;
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     HANDLE hFile;
     if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
@@ -236,7 +246,7 @@ static int Lfiletime(lua_State *L) {
 
 static int Lfilesize(lua_State *L) {
     WIN32_FIND_DATA wfd;
-    const char *s = get_single_pathname(L);
+    const char *s = get_single_pathname(L, NULL);
     HANDLE hFile;
     if ((hFile = FindFirstFileA(s, &wfd)) == INVALID_HANDLE_VALUE)
         return push_lasterror(L);
@@ -297,7 +307,8 @@ static int Ltouch(lua_State *L) {
 }
 
 static int Lnormpath(lua_State *L) {
-    const char *s = get_single_pathname(L);
+    size_t len;
+    const char *s = get_single_pathname(L, &len);
     while (isspace(*s)) ++s;
     if (!strncmp(s, "\\\\.\\", 4) || !strncmp(s, "\\\\?\\", 4)) {
         lua_settop(L, 1);
@@ -307,14 +318,14 @@ static int Lnormpath(lua_State *L) {
         int backslash = 0;
         while (s[backslash] == '\\') ++backslash;
         if (backslash == 0)
-            return normpath_impl(L, s);
+            return normpath_impl(L, s, len);
         lua_pushlstring(L, s, backslash - 1);
-        normpath_impl(L, &s[backslash - 1]);
+        normpath_impl(L, &s[backslash - 1], len);
         lua_concat(L, 2);
         return 1;
     }
     lua_pushfstring(L, "%c:", toupper(*s));
-    normpath_impl(L, s + 2);
+    normpath_impl(L, s + 2, len);
     lua_concat(L, 2);
     return 1;
 }
