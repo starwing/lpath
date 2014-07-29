@@ -129,7 +129,7 @@ static int relpath_impl(lua_State *L, const char *fn, const char *path, int path
     return 1;
 }
 
-static int Ljoinpath(lua_State *L) {
+static int Ljoin(lua_State *L) {
     luaL_Buffer b;
     int i, top = lua_gettop(L);
     luaL_buffinit(L, &b);
@@ -153,7 +153,7 @@ static const char *get_single_pathname(lua_State *L, size_t *psz) {
         return ".";
     }
     if (top > 1) {
-        Ljoinpath(L);
+        Ljoin(L);
         lua_replace(L, 1);
         lua_settop(L, 1);
     }
@@ -207,11 +207,11 @@ NYI_impl(walkpath, (lua_State *L, const char *s, WalkFunc *walk))
 
 /* common routines */
 
-static int Labspath(lua_State *L) {
+static int Labs(lua_State *L) {
     return abspath_impl(L, get_single_pathname(L, NULL), NULL);
 }
 
-static int Lrelpath(lua_State *L) {
+static int Lrel(lua_State *L) {
     size_t lf, lp;
     const char *fn = luaL_checklstring(L, 1, &lf);
     const char *path = luaL_checklstring(L, 2, &lp);
@@ -239,7 +239,7 @@ static int Lsplitext(lua_State *L) {
     return 2;
 }
 
-static int Lsplitpath(lua_State *L) {
+static int Lsplit(lua_State *L) {
     const char *fname = get_single_pathname(L, NULL);
     size_t pos = 0;
     int top = lua_gettop(L);
@@ -383,7 +383,7 @@ redo:
     return nrets;
 }
 
-static int Lwalkpath(lua_State *L) {
+static int Lwalk(lua_State *L) {
     const char *s = get_single_pathname(L, NULL);
     lua_pushcfunction(L, walkpath_iter);
     lua_createtable(L, 3, 0);
@@ -402,14 +402,14 @@ static luaL_Reg libs[] = {
     ENTRY(dir),       ENTRY(filesize),
     ENTRY(isdir),     ENTRY(cmptime),
     ENTRY(chdir),     ENTRY(touch),
-    ENTRY(mkdir),     ENTRY(abspath),
-    ENTRY(rmdir),     ENTRY(relpath),
+    ENTRY(mkdir),     ENTRY(abs),
+    ENTRY(rmdir),     ENTRY(rel),
     ENTRY(mkdir_rec), ENTRY(normpath),
-    ENTRY(rmdir_rec), ENTRY(joinpath),
-    ENTRY(exists),    ENTRY(splitpath),
+    ENTRY(rmdir_rec), ENTRY(join),
+    ENTRY(exists),    ENTRY(split),
     ENTRY(getcwd),    ENTRY(splitext),
     ENTRY(setenv),    ENTRY(iterpath),
-    ENTRY(filetime),  ENTRY(walkpath),
+    ENTRY(filetime),  ENTRY(walk),
 #undef  ENTRY
     { NULL, NULL }
 };
