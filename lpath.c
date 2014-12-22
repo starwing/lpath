@@ -1139,11 +1139,11 @@ static int Lplatform(lua_State *L) {
     if (uname(&buf) != 0) {
         int nrets;
         lua_pushstring(L, PLAT);
-        nrets = push_lasterror(L);
+        nrets = push_lasterror(L, "platform", NULL);
         lua_remove(L, -nrets); /* remove nil */
         return nrets;
     }
-    lua_pushstring(L, buf.system);
+    lua_pushstring(L, buf.sysname);
     lua_pushstring(L, buf.nodename);
     lua_pushstring(L, buf.release);
     lua_pushstring(L, buf.version);
