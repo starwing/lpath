@@ -640,7 +640,7 @@ static HANDLE open_file_for_handle(lua_State *L, const char *s) {
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
             NULL,                  /* default security     */
             OPEN_EXISTING,         /* existing file only   */
-            0,                     /* no file attributes   */
+            FILE_FLAG_BACKUP_SEMANTICS, /* can read folder */
             NULL);                 /* no attr. template    */
     lua_pop(L, 1); /* remove wide path */
     return hFile;
@@ -975,7 +975,7 @@ static int Ltouch(lua_State *L) {
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
             NULL,                  /* default security   */
             OPEN_ALWAYS,           /* existing file only */
-            0,                     /* no file attributes */
+            FILE_FLAG_BACKUP_SEMANTICS, /* can touch folders */
             NULL);                 /* no attr. template  */
     lua_pop(L, 1); /* remove wide path */
     if (hFile == INVALID_HANDLE_VALUE)
