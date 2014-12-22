@@ -2,7 +2,7 @@ lpath - Path utils for Lua
 ==========================
 
 `lpath` is a
-[lfs][http://keplerproject.github.io/luafilesystem/]-like Lua module
+[lfs](http://keplerproject.github.io/luafilesystem/)-like Lua module
 to handle path, file system and
 file informations.
 
@@ -14,7 +14,7 @@ This module is inspired by Python's os.path module. It split into 3
 parts: `path.info`, `path.fs` and `path` itself.
 
 `path.info` has several constants about current system:
-   - `platform`: `"windows"` on Windows, `uname -a` name for POSIX that support `uname()`, `"posix"` on other POSIX systems, `"unknown"` otherwise.
+   - `platform`: `"windows"` on Windows, `"posix"` on POSIX systems, `"unknown"` otherwise.
    - `sep`: separator of directory on current system. It's `"\\"` on Windows, `"/"` otherwise.
    - `altsep`: the alternative directory separator, always `"/"`.
    - `curdir`: the current directory, usually `"."`.
@@ -45,6 +45,10 @@ and pass the result of `path.join()` to functions.
 
 Functions:
 ----------
+
+- `path.fs.platform() -> string`
+> return a system name from `uname()` if use POSIX systems. return
+> `"windows"` on Windows systems.
 
 - `path.fs.getcwd() -> string`
 > get the current working directory.
