@@ -44,8 +44,8 @@ extern "C" {
 #define isdirsep(ch)   ((ch) == DIR_SEP_CHAR || (ch) == ALT_SEP_CHAR)
 #define iseos(ch)       ((ch) == '\0')
 #define isdirend(ch)   (isdirsep(ch) || iseos(ch))
-#define iscurdir(s)    (memcmp((s), CUR_DIR, CURDIR_LEN+1) == 0)
-#define ispardir(s)    (memcmp((s), PAR_DIR, PARDIR_LEN+1) == 0)
+#define iscurdir(s)    (memcmp((s), CUR_DIR, CURDIR_LEN) == 0 && isdirend(s[CURDIR_LEN]))
+#define ispardir(s)    (memcmp((s), PAR_DIR, PARDIR_LEN) == 0 && isdirend(s[PARDIR_LEN]))
 
 #define COMP_MAX 50
 
@@ -62,12 +62,12 @@ static size_t normpath(char *out, const char *in) {
         if (iseos(*in))
             break;
 
-        if (iscurdir(in) && isdirend(in[CURDIR_LEN])) {
+        if (iscurdir(in)) {
             in += CURDIR_LEN;
             continue;
         }
 
-        if (ispardir(in) && isdirend(in[PARDIR_LEN])) {
+        if (ispardir(in)) {
             in += PARDIR_LEN;
             if (top != pos + 1)
                 out = *--top;
@@ -94,7 +94,7 @@ static size_t normpath(char *out, const char *in) {
     *out = '\0';
     if (*head == '\0') {
         memcpy(head, CUR_DIR, CURDIR_LEN);
-        head[CURDIR_LEN] = DIR_SEP_CHAR;
+        return 1;
     }
     return out - head;
 }
@@ -116,6 +116,14 @@ static int relpath_base(lua_State *L, const char *fn, const char *path) {
     luaL_Buffer b;
     int count_dot2 = 0;
     const char *pf = fn, *pp = path;
+    if (iscurdir(path)) {
+        path += CURDIR_LEN;
+        if (isdirsep(*path)) ++path;
+        if (iseos(*path)) {
+            lua_pushstring(L, fn);
+            return 1;
+        }
+    }
 #ifdef WIN32
     while (*pf != '\0' && *pp != '\0'
             && tolower(*pf) == tolower(*pp))
@@ -149,6 +157,17 @@ static int relpath_base(lua_State *L, const char *fn, const char *path) {
     return 1;
 }
 
+static int add_dirsep(lua_State *L, const char *s, size_t len) {
+    size_t oldlen = len;
+    while (len > 1 && isdirsep(s[len-1]))
+        --len;
+    if (len < oldlen)
+        lua_pushlstring(L, s, len+1);
+    else
+        lua_pushfstring(L, "%s%s", s, DIR_SEP);
+    return 1;
+}
+
 static int joinpath_base(lua_State *L) {
     luaL_Buffer b;
     int i, top = lua_gettop(L);
@@ -156,11 +175,11 @@ static int joinpath_base(lua_State *L) {
     for (i = 1; i <= top; ++i) {
         size_t len;
         const char *s = luaL_checklstring(L, i, &len);
-        if (i != 1)
-            luaL_addchar(&b, DIR_SEP_CHAR);
-        while (s[len - 1] == DIR_SEP_CHAR)
-            --len;
-        luaL_addlstring(&b, s, len);
+        if (i == top)
+            lua_pushvalue(L, top);
+        else
+            add_dirsep(L, s, len);
+        luaL_addvalue(&b);
     }
     luaL_pushresult(&b);
     return 1;
@@ -301,7 +320,7 @@ static int Lutf8_base(lua_State *L) { return lua_gettop(L); }
 #undef relpath_impl
 
 static int normpath_impl(lua_State *L, const char *s, size_t len) {
-    if (isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
+    if (len > 2 && isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
         /* UNC path? */
         lua_pushlstring(L, s, len);
         return 1;
@@ -312,8 +331,9 @@ static int normpath_impl(lua_State *L, const char *s, size_t len) {
         lua_concat(L, 2);
         return 1;
     }
-    else if (isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
-        /* UNC path? */
+    else if (len > 4 &&
+            isdirsep(s[0]) && isdirsep(s[1]) && s[2] == '?' && isdirsep(s[3])) {
+        /* externed path? */
         lua_pushliteral(L,  DIR_SEP);
         normpath_base(L, s+1, len-1);
         lua_concat(L, 2);
@@ -428,8 +448,10 @@ static int joinpath_impl(lua_State *L) {
             d = cd, dlen = cdlen;
         }
         /* second path is relative to the first */
-        s = lua_tostring(L, top+2);
-        lua_pushfstring(L, "%s%s%s", s, DIR_SEP, cp);
+        s = lua_tolstring(L, top+2, &len);
+        add_dirsep(L, s, len);
+        lua_pushvalue(L, -2); /* cp */
+        lua_concat(L, 2);
         lua_replace(L, top+2);
         lua_pop(L, 2); /* pop drive and path */
     }
@@ -467,7 +489,7 @@ static int push_win32error(lua_State *L, DWORD errnum, const char *title, const 
 
 static LPCSTR push_multibyte(lua_State *L, LPCWSTR ws, int cp) {
     LPSTR buff;
-    int len = (int)wcslen(ws);
+    int len = (int)wcslen(ws); /* doesn't need include '\0' in lua string */
     int bytes = WideCharToMultiByte(cp, 0, ws, len, NULL, 0, NULL, NULL);
     if (bytes == 0) goto error;
     buff = (LPSTR)lua_newuserdata(L, bytes * sizeof(CHAR));
@@ -484,11 +506,10 @@ error:
 
 static LPCWSTR push_widechar(lua_State *L, LPCSTR s, int cp) {
     LPWSTR buff;
-    int len = (int)strlen(s);
-    int bytes = MultiByteToWideChar(cp, 0, s, len, NULL, 0);
+    int bytes = MultiByteToWideChar(cp, 0, s, -1, NULL, 0);
     if (bytes == 0) goto error;
     buff = (LPWSTR)lua_newuserdata(L, bytes * sizeof(WCHAR));
-    bytes = MultiByteToWideChar(cp, 0, s, len, buff, bytes);
+    bytes = MultiByteToWideChar(cp, 0, s, -1, buff, bytes);
     if (bytes == 0) goto error;
     lua_pushlstring(L, (const char*)buff, bytes*sizeof(WCHAR));
     lua_remove(L, -2);
@@ -519,8 +540,7 @@ static LPCSTR push_pathA(lua_State *L, LPCWSTR ws) {
 static LPCWSTR push_pathW(lua_State *L, LPCSTR s) {
     WCHAR buff[MAX_PATH];
     LPWSTR p = buff;
-    int len = (int)strlen(s);
-    int bytes = MultiByteToWideChar(CP_ACP, 0, s, len, p, MAX_PATH);
+    int bytes = MultiByteToWideChar(CP_ACP, 0, s, -1, p, MAX_PATH);
     if (bytes == 0) {
         DWORD err = GetLastError();
         if (err == ERROR_INSUFFICIENT_BUFFER)
@@ -758,15 +778,18 @@ redo:
 }
 
 static int dir_impl(lua_State *L, DirData *d, const char *s) {
-    const char *pattern = lua_pushfstring(L, "%s%s*", s, DIR_SEP);
-    LPCWSTR wpattern = push_pathW(L, pattern);
     HANDLE hFile;
-    if ((hFile = FindFirstFileW(wpattern, &d->wfd)) == INVALID_HANDLE_VALUE) {
-        lua_pop(L, 1); /* remove wide path */
+    LPCWSTR wpattern;
+    add_dirsep(L, s, strlen(s));
+    lua_pushliteral(L, "*");
+    lua_concat(L, 2);
+    wpattern = push_pathW(L, lua_tostring(L, -1));
+    hFile = FindFirstFileW(wpattern, &d->wfd);
+    lua_pop(L, 2); /* remove pattern and wide path */
+    if (hFile == INVALID_HANDLE_VALUE) {
         push_lasterror(L, "dir", s);
         return lua_error(L);
     }
-    lua_pop(L, 2);
     d->lasterror = NO_ERROR;
     d->hFile = hFile;
     lua_pushcfunction(L, dir_iter);
@@ -945,28 +968,23 @@ static int Ltouch(lua_State *L) {
     BOOL success;
     FILETIME at, mt;
     SYSTEMTIME st;
-    const char *s = check_pathcomps(L, NULL);
+    const char *s = luaL_checkstring(L, 1);
     LPCWSTR ws = push_pathW(L, s);
     HANDLE hFile = CreateFileW(ws, /* file to open       */
             FILE_WRITE_ATTRIBUTES, /* open for write attributes   */
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
             NULL,                  /* default security   */
-            OPEN_EXISTING,         /* existing file only */
+            OPEN_ALWAYS,           /* existing file only */
             0,                     /* no file attributes */
             NULL);                 /* no attr. template  */
+    lua_pop(L, 1); /* remove wide path */
     if (hFile == INVALID_HANDLE_VALUE)
         return push_lasterror(L, "touch", s);
     GetSystemTime(&st);
     SystemTimeToFileTime(&st, &at);
     mt = at;
-    if (lua_gettop(L) != 1) {
-        if (!opt_filetime(L, 2, &at)) {
-            at.dwLowDateTime = -1;
-            at.dwHighDateTime = -1;
-        }
-        mt = at;
-        opt_filetime(L, 3, &mt);
-    }
+    opt_filetime(L, 2, &at);
+    opt_filetime(L, 4, &mt);
     success = SetFileTime(hFile,
             NULL, /* create time */
             &at,  /* access time */
@@ -1632,6 +1650,7 @@ static int Litercomp(lua_State *L) {
 
 static int walkpath_iter(lua_State *L) {
     const char *path;
+    /* stack: stack_table */
 #if LUA_VERSION_NUM >= 502
     int nrets, stacktop = lua_rawlen(L, 1);
 #else
@@ -1672,13 +1691,23 @@ redo:
 }
 
 static int Lwalk(lua_State *L) {
-    const char *s = check_pathcomps(L, NULL);
-    lua_pushcfunction(L, walkpath_iter);
-    lua_createtable(L, 3, 0);
-    lua_pushfstring(L, "%s%c", s, DIR_SEP_CHAR);
-    dir_impl(L, dirdata_new(L), s);
-    lua_rawseti(L, -4, 3);
+    size_t len;
+    const char *s = check_pathcomps(L, &len); /* 1 */
+    normpath_impl(L, s, len); /* 1 */
+    s = lua_tolstring(L, -1, &len);
+    lua_pushcfunction(L, walkpath_iter); /* 2 */
+    lua_createtable(L, 3, 0); /* 3 */
+    if (s[len-1] == DIR_SEP_CHAR)
+        lua_pushvalue(L, -3); /* 1->4 */
+    else
+        lua_pushfstring(L, "%s%s", lua_tostring(L, -3), DIR_SEP); /* 4 */
+    dir_impl(L, dirdata_new(L), s); /* ... path iter table path iter dirdata */
+    lua_rawseti(L, -4, 3); 
     lua_rawseti(L, -3, 2);
+    if (iscurdir(s)) {
+        lua_pop(L, 1);
+        lua_pushstring(L, "");
+    }
     lua_rawseti(L, -2, 1);
     return 2;
 }

@@ -102,9 +102,9 @@ Functions:
 - `path.fs.fsize([comp]) -> number`
 > return the size of file.
 
-- `path.fs.touch(path[, atime[, ctime[, mtime]]]) -> path`
+- `path.fs.touch(path[, atime[, mtime]]) -> path`
 > if `path` is not exists, create a empty file at `path`, otherwise
-> update file's time to current. If given `atime`, `ctime` or `mtime`,
+> update file's time to current. If given `atime` or `mtime`,
 > update file's time to these values.
 
 - `path.fs.copy(f1, f2[, fail_if_exists]) -> true`
