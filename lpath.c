@@ -295,6 +295,8 @@ static int Lnormcase_base(lua_State *L) { return Lnormpath(L); }
 static int Lansi_base(lua_State *L) { return lua_gettop(L); }
 static int Lutf8_base(lua_State *L) { return lua_gettop(L); }
 
+#define override_base(name) ((void)(void(*)())name##_base)
+
 #define Lansi Lansi_base
 #define Lisabs Lisabs_base
 #define Lnormcase Lnormcase_base
@@ -344,7 +346,7 @@ static int normpath_impl(lua_State *L, const char *s, size_t len) {
 
 static int splitdrive_impl(lua_State *L, const char *s, size_t len) {
     if (isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
-        char *mp, *mp2;
+        const char *mp, *mp2;
         /* is a UNC path:
          * vvvvvvvvvvvvvvvvvvvv drive letter or UNC path
          * \\machine\mountpoint\directory\etc\...
@@ -412,7 +414,7 @@ static int joinpath_impl(lua_State *L) {
     size_t dlen, len;
     const char *d, *s = luaL_checklstring(L, 1, &len);
     int i, top = lua_gettop(L);
-    (void)joinpath_base;
+    override_base(joinpath);
     splitdrive_impl(L, s, len); /* drive(d) */
     d = lua_tolstring(L, top+1, &dlen);
     for (i = 2; i <= top; ++i) {
@@ -593,7 +595,7 @@ static int opt_filetime(lua_State *L, int idx, PFILETIME pft) {
 static int Lansi(lua_State *L) {
     const char *utf8 = luaL_checkstring(L, 1);
     LPCWSTR ws = push_widechar(L, utf8, CP_UTF8);
-    (void)Lansi_base;
+    override_base(Lansi);
     push_multibyte(L, ws, CP_ACP);
     return 1;
 }
@@ -601,7 +603,7 @@ static int Lansi(lua_State *L) {
 static int Lutf8(lua_State *L) {
     const char *ansi = luaL_checkstring(L, 1);
     LPCWSTR ws = push_widechar(L, ansi, CP_ACP);
-    (void)Lutf8_base;
+    override_base(Lutf8);
     push_multibyte(L, ws, CP_UTF8);
     return 1;
 }
@@ -640,7 +642,7 @@ static HANDLE open_file_for_handle(lua_State *L, const char *s) {
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
             NULL,                  /* default security     */
             OPEN_EXISTING,         /* existing file only   */
-            FILE_FLAG_BACKUP_SEMANTICS, /* can read folder */
+            0,                     /* no file attributes   */
             NULL);                 /* no attr. template    */
     lua_pop(L, 1); /* remove wide path */
     return hFile;
@@ -674,7 +676,7 @@ static int Lrealpath(lua_State *L) {
 static int Lnormcase(lua_State *L) {
     size_t len;
     const char *s;
-    int i, start = 0;
+    size_t i, start = 0;
     luaL_Buffer b;
     Lnormcase_base(L);
     s = lua_tolstring(L, -1, &len);
@@ -690,9 +692,9 @@ static int Lnormcase(lua_State *L) {
 static int Lisabs(lua_State *L) {
     size_t len;
     const char *s = check_pathcomps(L, &len);
-    (void)Lisabs_base;
+    override_base(Lisabs);
     if (isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
-        char *mp, *mp2;
+        const char *mp, *mp2;
         lua_pushboolean(L,
                 ((mp = strchr(s+2, DIR_SEP_CHAR)) == NULL
                  && (mp = strchr(s+2, ALT_SEP_CHAR)) == NULL)
@@ -710,7 +712,7 @@ static int Lisabs(lua_State *L) {
 static int Lsplitdrive(lua_State *L) {
     size_t len;
     const char *s = check_pathcomps(L, &len);
-    (void)Lsplitdrive_base;
+    override_base(Lsplitdrive);
     return splitdrive_impl(L, s, len);
 }
 
@@ -746,7 +748,7 @@ static void dir_close(DirData *d) {
 
 static int dir_iter(lua_State *L) {
     int skip;
-    DirData *d = lua_touserdata(L, 1);
+    DirData *d = (DirData*)lua_touserdata(L, 1);
     assert(d != NULL);
 redo:
     if (d->lasterror == ERROR_NO_MORE_FILES) {
@@ -975,7 +977,7 @@ static int Ltouch(lua_State *L) {
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
             NULL,                  /* default security   */
             OPEN_ALWAYS,           /* existing file only */
-            FILE_FLAG_BACKUP_SEMANTICS, /* can touch folders */
+            0,                     /* no file attributes */
             NULL);                 /* no attr. template  */
     lua_pop(L, 1); /* remove wide path */
     if (hFile == INVALID_HANDLE_VALUE)
