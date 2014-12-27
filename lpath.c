@@ -1772,7 +1772,6 @@ static int Lmakedirs(lua_State *L) {
 static int rmdir_rec_walk(WalkState *S) {
     lua_State *L = S->L;
     int nrets;
-    const char *p;
     lua_pushfstring(L, "%s" DIR_SEP "%s",
             S->path, S->comp);
     if (S->isdir)
