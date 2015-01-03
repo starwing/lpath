@@ -272,8 +272,9 @@ static int Lexpandvars(lua_State *L);
 static int Lrealpath(lua_State *L);
 /* dir utils */
 static void dir_close(DirData *d);
-static int chdir_impl(lua_State *L, const char *s);
 static int dir_impl(lua_State *L, DirData *d, const char *s);
+static int isdir_impl(lua_State *L, const char *s);
+static int chdir_impl(lua_State *L, const char *s);
 static int mkdir_impl(lua_State *L, const char *s);
 static int rmdir_impl(lua_State *L, const char *s);
 static int walkpath_dfs(WalkState* S);
@@ -838,14 +839,13 @@ static int walkpath_dfs(WalkState *S) {
     if (S->limit == 0 || !S->isdir)
         return S->walk(S);
 
-    lua_pushfstring(L, "%s" DIR_SEP "%s*", S->path,
-            S->comp ? S->comp : "");
+    lua_pushfstring(L, "%s" DIR_SEP "%s*", S->path, S->comp);
     ws = push_pathW(L, lua_tostring(L, -1));
     hFile = FindFirstFileW(ws, &wfd);
     lua_pop(L, 2); /* remove path and wide path */
 
     if (hFile == INVALID_HANDLE_VALUE) {
-        lua_pushfstring(L, "%s%s", S->path, S->comp);
+        lua_pushfstring(L, "%s" DIR_SEP "%s", S->path, S->comp);
         nrets = push_lasterror(L, "dir", lua_tostring(L, -1));
         lua_remove(L, -nrets-1);
         return nrets;
@@ -859,8 +859,7 @@ static int walkpath_dfs(WalkState *S) {
             continue;
         luaL_checkstack(L, 2, "directory too deep");
         push_pathA(L, wfn);
-        lua_pushfstring(L, "%s%s%s" ,
-                S->comp ? S->comp : "", lua_tostring(L, -1),
+        lua_pushfstring(L, "%s%s%s", S->comp, lua_tostring(L, -1),
                 S->isdir ? DIR_SEP : "");
 
         S->comp = lua_tostring(L, -1);
@@ -879,11 +878,19 @@ static int walkpath_dfs(WalkState *S) {
     } while (FindNextFileW(hFile, &wfd));
     FindClose(hFile);
 
-    if (S->comp) {
-        S->isdir = 1;
-        return S->walk(S);
-    }
-    return 0;
+    S->isdir = 1;
+    return S->walk(S);
+}
+
+static int isdir_impl(lua_State *L, const char *s) {
+    WIN32_FIND_DATAW wfd;
+    LPCWSTR ws = push_pathW(L, s);
+    HANDLE hFile = FindFirstFileW(ws, &wfd);
+    lua_pop(L, 1);
+    if (hFile != INVALID_HANDLE_VALUE)
+        FindClose(hFile);
+    return hFile != INVALID_HANDLE_VALUE &&
+        (wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 static int chdir_impl(lua_State *L, const char *s) {
@@ -1276,8 +1283,7 @@ static int walkpath_dfs(WalkState *S) {
     if (S->limit == 0 || !S->isdir)
         return S->walk(S);
 
-    lua_pushfstring(L, "%s" DIR_SEP "%s", S->path,
-            S->comp ? S->comp : "");
+    lua_pushfstring(L, "%s" DIR_SEP "%s", S->path, S->comp);
     dirp = opendir(lua_tostring(L, -1));
     if (dirp == NULL) {
         nrets = push_lasterror(L, "dir", lua_tostring(L, -1));
@@ -1306,8 +1312,7 @@ static int walkpath_dfs(WalkState *S) {
         if (S->isdir && (iscurdir(dir->d_name) || ispardir(dir->d_name)))
             continue;
         luaL_checkstack(L, 1, "directory too deep");
-        lua_pushfstring(L, "%s%s%s",
-                S->comp ? S->comp : "", dir->d_name,
+        lua_pushfstring(L, "%s%s%s", S->comp, dir->d_name,
                 S->isdir ? DIR_SEP : "");
 
         S->comp = lua_tostring(L, -1);
@@ -1325,11 +1330,13 @@ static int walkpath_dfs(WalkState *S) {
     } while (1);
     closedir(dirp);
 
-    if (S->comp) {
-        S->isdir = 1;
-        return S->walk(S);
-    }
-    return 0;
+    S->isdir = 1;
+    return S->walk(S);
+}
+
+static int isdir_impl(lua_State *L, const char *s) {
+    struct stat buf;
+    return stat(s, &buf) == 0 && S_ISDIR(buf.st_mode);
 }
 
 static int chdir_impl(lua_State *L, const char *s) {
@@ -1510,12 +1517,13 @@ static int LNYI(lua_State *L) {
 }
 
 #define NYI_impl(n,arg) static int n##_impl arg { return LNYI(L); }
-NYI_impl(chdir,    (lua_State *L, const char *s))
 NYI_impl(dir,      (lua_State *L, DirData *d, const char *s))
 NYI_impl(exists,   (lua_State *L, const char *s))
+NYI_impl(isdir,    (lua_State *L, const char *s))
+NYI_impl(chdir,    (lua_State *L, const char *s))
 NYI_impl(mkdir,    (lua_State *L, const char *s))
-NYI_impl(remove,   (lua_State *L, const char *s))
 NYI_impl(rmdir,    (lua_State *L, const char *s))
+NYI_impl(remove,   (lua_State *L, const char *s))
 #undef NYI_impl
 
 #define NYI_impl(n) static int L##n(lua_State *L) { return LNYI(L); }
@@ -1593,8 +1601,8 @@ static int walkpath_impl(lua_State *L, const char *path, int deep, WalkFunc *wal
     S.walk = walk;
     S.data = data;
     S.path = path;
-    S.comp = NULL;
-    S.isdir = 1;
+    S.comp = "";
+    S.isdir = isdir_impl(L, path);
     S.L = L;
     S.base = lua_gettop(L);
     S.limit = deep;
@@ -1673,7 +1681,9 @@ typedef struct GlobState {
 
 static int glob_walker(WalkState *S) {
     GlobState *gs = (GlobState*)S->data;
-    if (fnmatch(gs->pattern, S->comp, strlen(S->comp))) {
+    size_t len;
+    const char *s = lua_tolstring(S->L, -1, &len);
+    if (len != 0 && fnmatch(gs->pattern, s, len)) {
         lua_pushvalue(S->L, -1);
         lua_rawseti(S->L, 3, gs->idx++);
     }
@@ -1684,7 +1694,7 @@ static int Lglob(lua_State *L) {
     GlobState gs;
     const char *p = luaL_checkstring(L, 1);
     const char *dir = luaL_optstring(L, 2, NULL);
-    int deep = luaL_optint(L, 4, -1);
+    lua_Integer deep = luaL_optinteger(L, 4, -1);
     int nrets;
     lua_settop(L, 3);
     if (lua_istable(L, 3))
@@ -1769,11 +1779,13 @@ static int Lmakedirs(lua_State *L) {
     return makedirs_impl(L, s, len);
 }
 
-static int rmdir_rec_walk(WalkState *S) {
+static int rmdir_walker(WalkState *S) {
     lua_State *L = S->L;
     int nrets;
-    lua_pushfstring(L, "%s" DIR_SEP "%s",
-            S->path, S->comp);
+    if (!S->isdir && *S->comp == '\0') /* root and not dir? */
+        return remove_impl(L, S->path);
+
+    lua_pushfstring(L, "%s" DIR_SEP "%s", S->path, S->comp);
     if (S->isdir)
         nrets = rmdir_impl(L, lua_tostring(L, -1));
     else
@@ -1785,7 +1797,7 @@ static int rmdir_rec_walk(WalkState *S) {
 static int Lremovedirs(lua_State *L) {
     int nrets;
     check_pathcomps(L, NULL);
-    nrets = walkpath_impl(L, lua_tostring(L, -1), -1, rmdir_rec_walk, NULL);
+    nrets = walkpath_impl(L, lua_tostring(L, -1), -1, rmdir_walker, NULL);
     if (nrets) return nrets;
     return_self(L);
 }
@@ -2004,7 +2016,7 @@ LUALIB_API int luaopen_path_info(lua_State *L) {
 /*
  * linuxcc: flags+='-O2 -shared'
  * linuxcc: output='path.so' run='lua test.lua'
- * cc: lua='lua52' libs+='d:/$lua/$lua.dll'
- * cc: flags+='-s -O3 -pedantic -mdll -DLUA_BUILD_AS_DLL -Id:/$lua/include'
+ * cc: lua='lua53' libs+='d:/$lua/$lua.dll'
+ * cc: flags+='-s -O3 -std=c99 -pedantic -mdll -DLUA_BUILD_AS_DLL -Id:/$lua/include'
  * cc: output='path.dll' run='lua test.lua'
  */
