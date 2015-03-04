@@ -1640,14 +1640,19 @@ static int fnmatch(const char *pattern, const char *s, size_t len) {
     const char *s_end = s+len;
     while (*pattern != '\0') {
         const char *ec;
-        size_t i, min = 0;
+        size_t i, min = 0, hasmax = 0;
         switch (*pattern) {
         case '*': case '?':
             while (*pattern == '*' || *pattern == '?') {
-                if (*pattern++ == '?') ++min;
+                if (*pattern++ == '?')
+                    ++min;
+                else
+                    hasmax = 1;
             }
             if (s_end - s < min)
                 return 0;
+            if (!hasmax)
+                return fnmatch(pattern, s+min, (s_end-s) - min);
             len = (s_end-s) - min;
             for (i = 0; i <= len; ++i) {
                 if (fnmatch(pattern, s_end-i, i))
@@ -1693,7 +1698,7 @@ static int glob_walker(WalkState *S) {
 static int Lglob(lua_State *L) {
     GlobState gs;
     const char *p = luaL_checkstring(L, 1);
-    const char *dir = luaL_optstring(L, 2, NULL);
+    const char *dir = luaL_optstring(L, 2, ".");
     lua_Integer deep = luaL_optinteger(L, 4, -1);
     int nrets;
     lua_settop(L, 3);
