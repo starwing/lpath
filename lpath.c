@@ -1431,7 +1431,7 @@ static int Lcopy(lua_State *L) {
     const char *from = luaL_checkstring(L, 1);
     const char *to = luaL_checkstring(L, 2);
     int failIfExists = lua_toboolean(L, 3);
-    int mode = luaL_optint(L, 4, 0644);
+    lua_Integer mode = luaL_optinteger(L, 4, 0644);
     char buf[BUFSIZ];
     size_t size;
     int source, dest;

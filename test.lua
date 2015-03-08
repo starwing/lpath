@@ -10,7 +10,7 @@ local function print_table(name, t)
    end
    table.sort(keys)
    for _, k in ipairs(keys) do
-      print((">  %-10s = %-10s"):format(k, t[k]))
+      print((">  %-10s = %-10s"):format(k, tostring(t[k])))
    end
    print(("-"):rep(30))
 end
