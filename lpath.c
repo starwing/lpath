@@ -1445,8 +1445,13 @@ static int Lcopy(lua_State *L) {
         dest = open(to, O_WRONLY|O_CREAT|O_TRUNC, mode);
     if (dest < 0) return push_lasterror(L, "open", to);
 
-    while ((size = read(source, buf, BUFSIZ)) > 0)
-        write(dest, buf, size);
+    while ((size = read(source, buf, BUFSIZ)) > 0) {
+        if (write(dest, buf, size) < 0) {
+            close(source);
+            close(dest);
+            return push_lasterror(L, "write", to);
+        }
+    }
 
     close(source);
     close(dest);

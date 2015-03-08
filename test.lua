@@ -1,15 +1,22 @@
-local P = require "path"
+local path = require "path"
 local fs = require "path.fs"
 local info = require "path.info"
 
-local keys = {}
-for k,v in pairs(info) do
-   keys[#keys+1] = k
+local function print_table(name, t)
+   print("table "..name..":")
+   local keys = {}
+   for k,v in pairs(t) do
+      keys[#keys+1] = k
+   end
+   table.sort(keys)
+   for _, k in ipairs(keys) do
+      print((">  %-10s = %-10s"):format(k, t[k]))
+   end
+   print(("-"):rep(30))
 end
-table.sort(keys)
-for _, k in ipairs(keys) do
-   print(k, info[k])
-end
+print_table("path", path)
+print_table("path.fs", fs)
+print_table("path.info", info)
 
 local test_dir = {
    name = "test";
@@ -44,7 +51,7 @@ end
 
 add_test("abs", function ()
    local cwd = fs.getcwd()
-   assert(P.abs("foo") == P.join(cwd, "foo"))
+   assert(path.abs("foo") == path.join(cwd, "foo"))
 end)
 add_test("itercomp", function ()
 end)
@@ -79,7 +86,7 @@ add_test("mkdir", function ()
    fs.removedirs "test"
    assert(fs.mkdir "test")
    assert(fs.exists "test")
-   assert(P.type "test" == "dir")
+   assert(path.type "test" == "dir")
 end)
 add_test("makedirs", function ()
    local function _dfs(d)
@@ -108,11 +115,12 @@ add_test("dir", function ()
       local dirs = {}
       for fn, ft in fs.dir '.' do
          assert(fn ~= '.' and fn ~= '..')
-print(fn, ft)
          if ft == 'dir' or (ft == nil and fs.type(fn) == "dir") then
+            assert(not dirs[fn])
             dirs[fn] = true
          else
-            files[fn] = true 
+            assert(not files[fn])
+            files[fn] = true
          end
       end
       for k, v in ipairs(d) do
