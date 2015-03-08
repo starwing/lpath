@@ -1,5 +1,6 @@
 lpath - Path utils for Lua
 ==========================
+[![Build Status](https://travis-ci.org/starwing/lpath.svg?branch=master)](https://travis-ci.org/starwing/lpath)
 
 `lpath` is a
 [lfs](http://keplerproject.github.io/luafilesystem/)-like Lua module
