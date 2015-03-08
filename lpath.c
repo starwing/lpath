@@ -8,6 +8,8 @@ extern "C" {
 }
 #endif
 
+#define LPATH_VERSION "lpath 0.1"
+
 #if LUA_VERSION_NUM < 502
 # define lua_rawlen lua_objlen
 # define luaL_newlib(L,libs) luaL_register(L, lua_tostring(L, 1), libs);
@@ -201,15 +203,15 @@ static int splitpath_base(lua_State *L, const char *s, size_t len) {
     }
 #endif
     if (isdirsep(*last)) {
-        const char *oldlast = last;
+        const char *first = last;
         /* remove trailing slashes from head, unless it's all slashes */
-        for (; s < last && isdirsep(*last); --last)
+        for (; s < first && isdirsep(*first); --first)
             ;
-        if (isdirsep(*last))
-            lua_pushlstring(L, s, oldlast - s);
+        if (isdirsep(*first))
+            lua_pushlstring(L, s, last - s);
         else
-            lua_pushlstring(L, s, last - s + 1);
-        lua_pushstring(L, oldlast + 1);
+            lua_pushlstring(L, s, first - s + 2); /* remain a splash '/' */
+        lua_pushstring(L, last + 1);
     }
     else {
         lua_pushliteral(L, "");
@@ -666,7 +668,13 @@ static int Labs(lua_State *L) {
     return 1;
 }
 
-static HANDLE open_file_for_handle(lua_State *L, const char *s) {
+static int Lrealpath(lua_State *L) {
+#if _WIN32_WINNT < 0x0600
+    return Labs(L);
+#else
+    WCHAR buff[MAX_PATH], *p = buff;
+    DWORD bytes;
+    const char *s = check_pathcomps(L, NULL);
     LPCWSTR ws = push_pathW(L, s);
     HANDLE hFile = CreateFileW(ws, /* file to open         */
             0,                     /* open only for handle */
@@ -676,17 +684,6 @@ static HANDLE open_file_for_handle(lua_State *L, const char *s) {
             0,                     /* no file attributes   */
             NULL);                 /* no attr. template    */
     lua_pop(L, 1); /* remove wide path */
-    return hFile;
-}
-
-static int Lrealpath(lua_State *L) {
-#if _WIN32_WINNT < 0x0600
-    return Labs(L);
-#else
-    WCHAR buff[MAX_PATH], *p = buff;
-    DWORD bytes;
-    const char *s = check_pathcomps(L, NULL);
-    HANDLE hFile = open_file_for_handle(L, s);
     if(hFile == INVALID_HANDLE_VALUE)
         return push_lasterror(L, "open", s);
     bytes = GetFinalPathNameByHandleW(hFile, p, MAX_PATH, 0);
@@ -952,7 +949,15 @@ static int Ltype(lua_State *L) {
 /* file utils */
 
 static int exists_impl(lua_State *L, const char *s) {
-    HANDLE hFile = open_file_for_handle(L, s);
+    LPCWSTR ws = push_pathW(L, s);
+    HANDLE hFile = CreateFileW(ws, /* file to open         */
+            FILE_WRITE_ATTRIBUTES, /* open only for handle */
+            FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
+            NULL,                  /* default security     */
+            OPEN_EXISTING,         /* existing file only   */
+            FILE_FLAG_BACKUP_SEMANTICS, /* open directory also */
+            NULL);                 /* no attr. template    */
+    lua_pop(L, 1); /* remove wide path */
     CloseHandle(hFile);
     return hFile != INVALID_HANDLE_VALUE;
 }
@@ -971,19 +976,23 @@ static int Lcmpftime(lua_State *L) {
     LPCWSTR wf1 = push_pathW(L, f1);
     LPCWSTR wf2 = push_pathW(L, f2);
     HANDLE hFile1, hFile2;
-    if ((hFile1 = FindFirstFileW(wf1, &wfd1)) == INVALID_HANDLE_VALUE)
-        return push_lasterror(L, "cmpftime", f1);
+    LONG cmp_c, cmp_m, cmp_a;
+    int nrets = 0;
+    if ((hFile1 = FindFirstFileW(wf1, &wfd1)) == INVALID_HANDLE_VALUE) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
     FindClose(hFile1);
-    if ((hFile2 = FindFirstFileW(wf2, &wfd2)) == INVALID_HANDLE_VALUE)
-        return push_lasterror(L, "cmpftime", f2);
+    if ((hFile2 = FindFirstFileW(wf2, &wfd2)) == INVALID_HANDLE_VALUE) {
+        lua_pushinteger(L, 1);
+        return 1;
+    }
     FindClose(hFile2);
-    lua_pushinteger(L, CompareFileTime(&wfd1.ftCreationTime,
-                                       &wfd2.ftCreationTime));
-    lua_pushinteger(L, CompareFileTime(&wfd1.ftLastAccessTime,
-                                       &wfd2.ftLastAccessTime));
-    lua_pushinteger(L, CompareFileTime(&wfd1.ftLastWriteTime,
-                                       &wfd2.ftLastWriteTime));
-    return 3;
+    cmp_c = CompareFileTime(&wfd1.ftCreationTime, &wfd2.ftCreationTime);
+    cmp_m = CompareFileTime(&wfd1.ftLastWriteTime, &wfd2.ftLastWriteTime);
+    cmp_a = CompareFileTime(&wfd1.ftLastAccessTime, &wfd2.ftLastAccessTime);
+    lua_pushinteger(L, cmp_c == 0 ? cmp_m == 0 ? cmp_a : cmp_m : cmp_c);
+    return 1;
 }
 
 static int Lcopy(lua_State *L) {
@@ -1022,8 +1031,8 @@ static int Lftime(lua_State *L) {
         return push_lasterror(L, "ftime", s);
     FindClose(hFile);
     push_filetime(L, &wfd.ftCreationTime);
-    push_filetime(L, &wfd.ftLastAccessTime);
     push_filetime(L, &wfd.ftLastWriteTime);
+    push_filetime(L, &wfd.ftLastAccessTime);
     return 3;
 }
 
@@ -1392,18 +1401,30 @@ static int remove_impl(lua_State *L, const char *s) {
     return 0;
 }
 
+static int cmptime(time_t t1, time_t t2) {
+    return t1 < t2 ? -1 : t1 > t2 ? 1 : 0;
+}
+
 static int Lcmpftime(lua_State *L) {
     struct stat buf1, buf2;
     const char *f1 = luaL_checkstring(L, 1);
     const char *f2 = luaL_checkstring(L, 1);
-    if (stat(f1, &buf1) != 0)
-        return push_lasterror(L, "stat", f1);
-    if (stat(f2, &buf2) != 0)
-        return push_lasterror(L, "stat", f2);
-    lua_pushinteger(L, buf1.st_ctime - buf1.st_ctime);
-    lua_pushinteger(L, buf1.st_atime - buf1.st_atime);
-    lua_pushinteger(L, buf1.st_mtime - buf1.st_mtime);
-    return 3;
+    int cmp_c, cmp_m, cmp_a;
+    int nrets = 0;
+    if (stat(f1, &buf1) != 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    if (stat(f2, &buf2) != 0) {
+        lua_pushinteger(L, 1);
+        return 1;
+
+    }
+    cmp_c = cmptime(buf1.st_ctime, buf2.st_ctime);
+    cmp_m = cmptime(buf1.st_mtime, buf2.st_mtime);
+    cmp_a = cmptime(buf1.st_atime, buf2.st_atime);
+    lua_pushinteger(L, cmp_c == 0 ? cmp_m == 0 ? cmp_a : cmp_m : cmp_c);
+    return 1;
 }
 
 static int Lcopy(lua_State *L) {
@@ -1459,8 +1480,8 @@ static int Lftime(lua_State *L) {
     if (stat(s, &buf) != 0)
         return push_lasterror(L, "stat", s);
     push_word64(L, buf.st_ctime);
-    push_word64(L, buf.st_atime);
     push_word64(L, buf.st_mtime);
+    push_word64(L, buf.st_atime);
     return 3;
 }
 
@@ -2007,6 +2028,7 @@ LUALIB_API int luaopen_path_info(lua_State *L) {
         { "pathsep",  PATH_SEP },
         { "platform", PLAT     },
         { "sep",      DIR_SEP  },
+        { "version",  LPATH_VERSION },
         { NULL, NULL }
     }, *p = values;
     lua_createtable(L, 0, sizeof(values)/sizeof(values[0])-1);
