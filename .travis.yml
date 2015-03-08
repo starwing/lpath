@@ -24,7 +24,7 @@ before_install:
   - sudo luarocks install lunitx
 
 install:
-  - sudo luarocks make $LUAROCKS CFLAGS="-O2 -fPIC -ftest-coverage -fprofile-arcs" LIBFLAG="-shared --coverage"
+  - sudo luarocks make $ROCKSPEC CFLAGS="-O2 -fPIC -ftest-coverage -fprofile-arcs" LIBFLAG="-shared --coverage"
 
 script: 
   - lua -e "print(require'path.info'.version)"
