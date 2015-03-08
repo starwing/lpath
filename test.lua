@@ -104,18 +104,29 @@ add_test("dir", function ()
    assert(fs.chdir "test/..")
    local function _check(d)
       assert(fs.chdir(assert(d.name)))
-      local idx = 1
+      local files = {}
+      local dirs = {}
       for fn, ft in fs.dir '.' do
          assert(fn ~= '.' and fn ~= '..')
+print(fn, ft)
          if ft == 'dir' or (ft == nil and fs.type(fn) == "dir") then
-            assert(d[idx].name == fn, "idx = "..idx..", name = "..tostring(d[idx].name)..", fn = "..fn)
-            _check(d[idx])
+            dirs[fn] = true
          else
-            assert(d[idx] == fn, "idx = "..idx..", name = "..tostring(d[idx])..", fn = "..fn)
+            files[fn] = true 
          end
-         idx = idx + 1
-         ::next::
       end
+      for k, v in ipairs(d) do
+         if type(v) == "string" then
+            assert(files[v])
+            files[v] = nil
+         else
+            assert(dirs[v.name])
+            dirs[v.name] = nil
+            _check(v)
+         end
+      end
+      assert(not next(files), next(files))
+      assert(not next(dirs), next(dirs))
       assert(fs.chdir "..")
    end
    _check(test_dir)
