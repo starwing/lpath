@@ -14,6 +14,7 @@ local function print_table(name, t)
    end
    print(("-"):rep(30))
 end
+print(fs.platform())
 print_table("path", path)
 print_table("path.fs", fs)
 print_table("path.info", info)

@@ -482,7 +482,7 @@ static int joinpath_impl(lua_State *L) {
 
 /* code page support */
 
-static int current_cp = CP_ACP;
+static UINT current_cp = CP_ACP;
 
 static int push_win32error(lua_State *L, DWORD errnum, const char *title, const char *fn) {
     /* error message are always ANSI copy page */
@@ -599,13 +599,23 @@ static int Lutf8(lua_State *L) {
 
 /* misc utils */
 
-static int Lplatform(lua_State *L) {
-    lua_pushstring(L, PLAT);
-    return 1;
-}
-
 static int push_lasterror(lua_State *L, const char *title, const char *fn) {
     return push_win32error(L, GetLastError(), title, fn);
+}
+
+static int Lplatform(lua_State *L) {
+    OSVERSIONINFO ver;
+    ver.dwOSVersionInfoSize = sizeof(ver);
+    if (!GetVersionEx(&ver))
+        return push_lasterror(L, "platform", NULL);
+    lua_pushfstring(L, "Windows %d.%d Build %d",
+            ver.dwMajorVersion,
+            ver.dwMinorVersion,
+            ver.dwBuildNumber);
+    lua_pushinteger(L, ver.dwMajorVersion);
+    lua_pushinteger(L, ver.dwMinorVersion);
+    lua_pushinteger(L, ver.dwBuildNumber);
+    return 4;
 }
 
 static void push_word64(lua_State *L, ULONGLONG ull) {
@@ -653,6 +663,28 @@ static int Lsetenv(lua_State *L) {
 
 /* path utils */
 
+typedef DWORD WINAPI PGetFinalPathNameByHandleW(
+  _In_   HANDLE hFile,
+  _Out_  LPWSTR lpszFilePath,
+  _In_   DWORD cchFilePath,
+  _In_   DWORD dwFlags
+);
+static PGetFinalPathNameByHandleW init_GetFinalPathNameByHandleW;
+static PGetFinalPathNameByHandleW *pGetFinalPathNameByHandleW = &init_GetFinalPathNameByHandleW;
+static DWORD WINAPI init_GetFinalPathNameByHandleW(
+  _In_   HANDLE hFile,
+  _Out_  LPWSTR lpszFilePath,
+  _In_   DWORD cchFilePath,
+  _In_   DWORD dwFlags) {
+    HMODULE hModule;
+    hModule = GetModuleHandleW(L"kernel32.dll");
+    pGetFinalPathNameByHandleW = (PGetFinalPathNameByHandleW*)GetProcAddress(
+            hModule, "GetFinalPathNameByHandleW");
+    if (pGetFinalPathNameByHandleW == NULL)
+        return 0;
+    return pGetFinalPathNameByHandleW(hFile, lpszFilePath, cchFilePath, dwFlags);
+}
+
 static int Labs(lua_State *L) {
     const char *s = check_pathcomps(L, NULL);
     LPCWSTR ws = push_pathW(L, s);
@@ -668,10 +700,7 @@ static int Labs(lua_State *L) {
     return 1;
 }
 
-static int Lrealpath(lua_State *L) {
-#if _WIN32_WINNT < 0x0600
-    return Labs(L);
-#else
+static int Lrealpath_impl(lua_State *L) {
     WCHAR buff[MAX_PATH], *p = buff;
     DWORD bytes;
     const char *s = check_pathcomps(L, NULL);
@@ -686,19 +715,28 @@ static int Lrealpath(lua_State *L) {
     lua_pop(L, 1); /* remove wide path */
     if(hFile == INVALID_HANDLE_VALUE)
         return push_lasterror(L, "open", s);
-    bytes = GetFinalPathNameByHandleW(hFile, p, MAX_PATH, 0);
+    bytes = pGetFinalPathNameByHandleW(hFile, p, MAX_PATH, 0);
     if (bytes > MAX_PATH) {
         p = (LPWSTR)lua_newuserdata(L, bytes * sizeof(WCHAR));
-        bytes = GetFinalPathNameByHandleW(hFile, p, bytes, 0);
+        bytes = pGetFinalPathNameByHandleW(hFile, p, bytes, 0);
     }
     CloseHandle(hFile);
-    if (bytes == 0) return push_lasterror(L, "realpath", s);
+    if (bytes == 0) {
+        if (pGetFinalPathNameByHandleW == NULL)
+            return Labs(L);
+        return push_lasterror(L, "realpath", s);
+    }
     if (bytes - 4 > MAX_PATH)
         push_pathA(L, p);
     else
         push_pathA(L, p + 4);
     return 1;
-#endif
+}
+
+static int Lrealpath(lua_State *L) {
+    if (pGetFinalPathNameByHandleW == NULL)
+        return Labs(L);
+    return Lrealpath_impl(L);
 }
 
 static int Lnormcase(lua_State *L) {
@@ -798,8 +836,8 @@ redo:
         ul.HighPart = d->wfd.nFileSizeHigh;
         push_word64(L, ul.QuadPart);
         push_filetime(L, &d->wfd.ftCreationTime);
-        push_filetime(L, &d->wfd.ftLastAccessTime);
         push_filetime(L, &d->wfd.ftLastWriteTime);
+        push_filetime(L, &d->wfd.ftLastAccessTime);
     }
     if (!FindNextFileW(d->hFile, &d->wfd))
         d->lasterror = GetLastError();
@@ -973,11 +1011,11 @@ static int Lcmpftime(lua_State *L) {
     WIN32_FIND_DATAW wfd1, wfd2;
     const char *f1 = luaL_checkstring(L, 1);
     const char *f2 = luaL_checkstring(L, 2);
+    int use_atime = lua_toboolean(L, 3);
     LPCWSTR wf1 = push_pathW(L, f1);
     LPCWSTR wf2 = push_pathW(L, f2);
     HANDLE hFile1, hFile2;
     LONG cmp_c, cmp_m, cmp_a;
-    int nrets = 0;
     if ((hFile1 = FindFirstFileW(wf1, &wfd1)) == INVALID_HANDLE_VALUE) {
         lua_pushinteger(L, -1);
         return 1;
@@ -991,7 +1029,10 @@ static int Lcmpftime(lua_State *L) {
     cmp_c = CompareFileTime(&wfd1.ftCreationTime, &wfd2.ftCreationTime);
     cmp_m = CompareFileTime(&wfd1.ftLastWriteTime, &wfd2.ftLastWriteTime);
     cmp_a = CompareFileTime(&wfd1.ftLastAccessTime, &wfd2.ftLastAccessTime);
-    lua_pushinteger(L, cmp_c == 0 ? cmp_m == 0 ? cmp_a : cmp_m : cmp_c);
+    if (use_atime)
+        lua_pushinteger(L, cmp_c == 0 ? cmp_m == 0 ? cmp_a : cmp_m : cmp_c);
+    else
+        lua_pushinteger(L, cmp_c == 0 ? cmp_m : cmp_c);
     return 1;
 }
 
@@ -1053,10 +1094,10 @@ static int Ltouch(lua_State *L) {
     if (hFile == INVALID_HANDLE_VALUE)
         return push_lasterror(L, "touch", s);
     GetSystemTime(&st);
-    SystemTimeToFileTime(&st, &at);
-    mt = at;
-    opt_filetime(L, 2, &at);
-    opt_filetime(L, 4, &mt);
+    SystemTimeToFileTime(&st, &mt);
+    at = mt;
+    opt_filetime(L, 2, &mt);
+    opt_filetime(L, 3, &at);
     success = SetFileTime(hFile,
             NULL, /* create time */
             &at,  /* access time */
@@ -1268,8 +1309,8 @@ redo:
         lua_pushstring(L, S_ISDIR(buf.st_mode) ? "dir" : "file");
         push_word64(L, buf.st_size);
         push_word64(L, buf.st_ctime);
-        push_word64(L, buf.st_atime);
         push_word64(L, buf.st_mtime);
+        push_word64(L, buf.st_atime);
         return 6;
     }
 }
@@ -1408,7 +1449,8 @@ static int cmptime(time_t t1, time_t t2) {
 static int Lcmpftime(lua_State *L) {
     struct stat buf1, buf2;
     const char *f1 = luaL_checkstring(L, 1);
-    const char *f2 = luaL_checkstring(L, 1);
+    const char *f2 = luaL_checkstring(L, 2);
+    int use_atime = lua_toboolean(L, 3);
     int cmp_c, cmp_m, cmp_a;
     int nrets = 0;
     if (stat(f1, &buf1) != 0) {
@@ -1423,7 +1465,10 @@ static int Lcmpftime(lua_State *L) {
     cmp_c = cmptime(buf1.st_ctime, buf2.st_ctime);
     cmp_m = cmptime(buf1.st_mtime, buf2.st_mtime);
     cmp_a = cmptime(buf1.st_atime, buf2.st_atime);
-    lua_pushinteger(L, cmp_c == 0 ? cmp_m == 0 ? cmp_a : cmp_m : cmp_c);
+    if (use_atime)
+        lua_pushinteger(L, cmp_c == 0 ? cmp_m == 0 ? cmp_a : cmp_m : cmp_c);
+    else
+        lua_pushinteger(L, cmp_c == 0 ? cmp_m : cmp_c);
     return 1;
 }
 
@@ -1470,8 +1515,8 @@ static int Ltouch(lua_State *L) {
     if (lua_gettop(L) == 1) /* set to current date/time */
         buf = NULL;
     else {
-        utb.actime = (time_t)opt_word64(L, 2, time(NULL));
-        utb.modtime = (time_t)opt_word64(L, 3, utb.actime);
+        utb.modtime = (time_t)opt_word64(L, 2, time(NULL));
+        utb.actime = (time_t)opt_word64(L, 3, utb.modtime);
         buf = &utb;
     }
     if (utime(s, buf) != 0)

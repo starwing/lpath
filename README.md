@@ -49,7 +49,8 @@ Functions:
 
 - `path.fs.platform() -> string`
 > return a system name from `uname()` if use POSIX systems. return
-> `"windows"` on Windows systems.
+> `"Windows m.n Build bbbb"` on Windows systems, `m` is the major
+> version, `n` is the minor version, and `bbbb` is the build number.
 
 - `path.fs.getcwd() -> string`
 > get the current working directory.
@@ -71,11 +72,11 @@ Functions:
 
 - `path.fs.dir([comp]) -> iterator`
 > return a iterator to list all files/folders in directory `[comp]`.
-> Iterator will return `name`, `type`, `size`, `[ACM]` file times in
+> Iterator will return `name`, `type`, `size`, `[CMA]` file times in
 > for:
 > 
 > ```lua
-> for fname, type, size, atime, ctime, mtime in path.fs.dir(".") do
+> for fname, type, size, ctime, mtime, atime in path.fs.dir(".") do
 >    -- ...
 > end
 > ```
@@ -92,18 +93,19 @@ Functions:
 - `path.fs.walk([comp]) -> iterator`
 > same as `path.fs.dir()`, but iterator a folder tree, recursively.
 
-- `path.fs.ftime([comp]) -> atime, ctime, mtime`
-> return the access time, create time and modify time of file.
+- `path.fs.ftime([comp]) -> ctime, mtime, atime`
+> return the create time, modify time and access time of file.
 
-- `path.cmpftime(file1, file2) `
-> return three integer, `0` for equal, `1` for `file1` is newer than
-> `file2`, `-1` for `file1` is older than `file2`. Each value is for
-> `atime`, `ctime` and `mtime` (see `path.fs.ftime()`).
+- `path.cmpftime(file1, file2, use_atime) `
+> return a integer, `0` for equal, `1` for `file1` is newer than
+> `file2`, `-1` for `file1` is older than `file2`.
+> if use_atime is true, the compare use access time, otherwise only
+> use create time and modify time only.
 
 - `path.fs.fsize([comp]) -> number`
 > return the size of file.
 
-- `path.fs.touch(path[, atime[, mtime]]) -> path`
+- `path.fs.touch(path[, mtime[, atime]]) -> path`
 > if `path` is not exists, create a empty file at `path`, otherwise
 > update file's time to current. If given `atime` or `mtime`,
 > update file's time to these values.
