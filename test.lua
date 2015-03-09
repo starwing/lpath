@@ -55,12 +55,41 @@ add_test("abs", function ()
    assert(path.abs("foo") == path.join(cwd, "foo"))
 end)
 add_test("itercomp", function ()
+   local function check(s, p)
+      local i = 1
+      local t = "abcdef"
+      for comp in path.itercomp(s) do
+         print(comp)
+         if p then
+            assert(comp == p)
+            p = p ~= info.sep and info.sep
+         else
+            assert(t:sub(i, i) == comp)
+            i = i + 1
+         end
+      end
+   end
+   check("a/b/c/d/e/f")
+   check("/a/b/c/d/e/f", info.sep)
+   if info.platform == "windows" then
+      check("c:/a/b/c/d/e/f", "c:")
+      check([[\\server\mountpoint\a\b\c\d\e\f]], [[\\server\mountpoint]])
+      check("//server/mountpoint/a/b/c/d/e/f", [[\\server\mountpoint]])
+   end
 end)
 add_test("join", function ()
+   local join = path.join
+   local sep = info.sep
+   assert(join("a", "b") == "a"..sep.."b")
+   assert(join("a", "/b") == sep.."b")
+   assert(join("/a", "/b") == sep.."b")
+   assert(join("/a", "/b") == sep.."b")
+   if info.platform == "windows" then
+      assert(join("c:/a", "c:/b") == [[c:\b]])
+      assert(join("//server/mp/a", "//server/mp/b") == [[\\server\mp\b]])
+   end
 end)
 add_test("normcase", function ()
-end)
-add_test("normpath", function ()
 end)
 add_test("realpath", function ()
 end)

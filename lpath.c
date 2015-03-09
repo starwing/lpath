@@ -8,11 +8,17 @@ extern "C" {
 }
 #endif
 
-#define LPATH_VERSION "lpath 0.1"
+#define LPATH_VERSION "path 0.1"
 
 #if LUA_VERSION_NUM < 502
 # define lua_rawlen lua_objlen
 # define luaL_newlib(L,libs) luaL_register(L, lua_tostring(L, 1), libs);
+#endif
+
+#ifdef __GNUC__
+# define lp_unused __attribute__((unused)) static
+#else
+# define lp_unused static
 #endif
 
 #ifdef _WIN32
@@ -37,7 +43,6 @@ extern "C" {
 /* path algorithms */
 
 #include <assert.h>
-#include <ctype.h>
 #include <string.h>
 
 #define ALT_SEP_CHAR  (ALT_SEP[0])
@@ -105,7 +110,7 @@ static size_t normpath(char *out, const char *in) {
     return out - head;
 }
 
-static int normpath_base(lua_State *L, const char *s, size_t len) {
+lp_unused int normpath_base(lua_State *L, const char *s, size_t len) {
     if (len < BUFSIZ) {
         char buff[BUFSIZ];
         lua_pushlstring(L, buff, normpath(buff, s));
@@ -118,7 +123,19 @@ static int normpath_base(lua_State *L, const char *s, size_t len) {
     return 1;
 }
 
-static int relpath_base(lua_State *L, const char *fn, const char *path) {
+static int fn_equal(int ch1, int ch2) {
+#ifndef _WIN32
+    if (ch1 == ch2)
+        return 1;
+    if (ch1 >= 'A' && ch1 <= 'Z')
+        ch1 += 'a' - 'A';
+    if (ch2 >= 'A' && ch2 <= 'Z')
+        ch1 += 'a' - 'A';
+#endif
+    return ch1 == ch2;
+}
+
+lp_unused int relpath_base(lua_State *L, const char *fn, const char *path) {
     luaL_Buffer b;
     int count_dot2 = 0;
     const char *pf = fn, *pp = path;
@@ -130,14 +147,8 @@ static int relpath_base(lua_State *L, const char *fn, const char *path) {
             return 1;
         }
     }
-#ifdef WIN32
-    while (*pf != '\0' && *pp != '\0'
-            && tolower(*pf) == tolower(*pp))
+    while (*pf != '\0' && *pp != '\0' && fn_equal(*pf, *pp))
         ++pf, ++pp;
-#else
-    while (*pf != '\0' && *pp != '\0' && *pf == *pp)
-        ++pf, ++pp;
-#endif
     if (*pf == '\0' && *pp == '\0') {
         lua_pushstring(L, CUR_DIR);
         return 1;
@@ -174,13 +185,15 @@ static int add_dirsep(lua_State *L, const char *s, size_t len) {
     return 1;
 }
 
-static int joinpath_base(lua_State *L) {
+lp_unused int joinpath_base(lua_State *L) {
     luaL_Buffer b;
     int i, top = lua_gettop(L);
     luaL_buffinit(L, &b);
     for (i = 1; i <= top; ++i) {
         size_t len;
         const char *s = luaL_checklstring(L, i, &len);
+        if (isdirsep(*s)) /* absolute path? */
+            b.n = 0; /* reset buffer */
         if (i == top)
             lua_pushvalue(L, top);
         else
@@ -191,7 +204,7 @@ static int joinpath_base(lua_State *L) {
     return 1;
 }
 
-static int splitpath_base(lua_State *L, const char *s, size_t len) {
+lp_unused int splitpath_base(lua_State *L, const char *s, size_t len) {
     const char *last = &s[len-1];
     for (; s < last && !isdirsep(*last); --last)
         ;
@@ -220,7 +233,7 @@ static int splitpath_base(lua_State *L, const char *s, size_t len) {
     return 2;
 }
 
-static int splitext_base(lua_State *L, const char *s, size_t len) {
+lp_unused int splitext_base(lua_State *L, const char *s, size_t len) {
     const char *last = &s[len];
     while (s < last && *--last != EXT_SEP_CHAR)
         ;
@@ -235,6 +248,12 @@ static int splitext_base(lua_State *L, const char *s, size_t len) {
     return 2;
 }
 
+/*
+ * these algorithms are base algorithms, so in a specfied system, one
+ * can "override" these. to do that, just #undef these macros, and
+ * declare real foo_impl functions in your system. see examples in
+ * windows port below.
+ */
 #define normpath_impl normpath_base
 #define relpath_impl relpath_base
 #define joinpath_impl joinpath_base
@@ -269,7 +288,7 @@ static const char *check_pathcomps(lua_State *L, size_t *psz);
 static int push_lasterror(lua_State *L, const char *title, const char *fn);
 static int Lsetenv(lua_State *L);
 /* path utils */
-static int Labs(lua_State *L);
+static int abs_impl(lua_State *L, const char *s);
 static int Lexpandvars(lua_State *L);
 static int Lrealpath(lua_State *L);
 /* dir utils */
@@ -295,37 +314,31 @@ static int Ltouch(lua_State *L);
 
 /* default system specfied implements  */
 
-static int Lisabs_base(lua_State *L) {
-    size_t len;
-    const char *s = check_pathcomps(L, &len);
-    lua_pushboolean(L, isdirsep(s[0]));
+lp_unused int Lisabs_def(lua_State *L) {
+    const char *s = check_pathcomps(L, NULL);
+    lua_pushboolean(L, isdirsep(*s));
     return 1;
 }
 
-static int Lsplitdrive_base(lua_State *L) {
-    check_pathcomps(L, NULL);
+lp_unused int splitdrive_def(lua_State *L, const char *s, size_t len) {
     lua_pushliteral(L, "");
-    lua_insert(L, -2);
+    lua_pushlstring(L, s, len);
     return 2;
 }
 
-static int Lnormpath(lua_State *L);
-static int Lnormcase_base(lua_State *L) { return Lnormpath(L); }
-static int Lansi_base(lua_State *L) { return lua_gettop(L); }
-static int Lutf8_base(lua_State *L) { return lua_gettop(L); }
+static int Ljoin(lua_State *L);
+lp_unused int Lnormcase_def(lua_State *L) { return Ljoin(L); }
+lp_unused int Lansi_def(lua_State *L) { return lua_gettop(L); }
+lp_unused int Lutf8_def(lua_State *L) { return lua_gettop(L); }
 
-#define override_base(name) ((void)(void(*)())name##_base)
-
-#define Lansi Lansi_base
-#define Lisabs Lisabs_base
-#define Lnormcase Lnormcase_base
-#define Lsplitdrive Lsplitdrive_base
-#define Lutf8 Lutf8_base
+#define Lansi Lansi_def
+#define Lisabs Lisabs_def
+#define Lnormcase Lnormcase_def
+#define Lutf8 Lutf8_def
+#define splitdrive_impl splitdrive_def
 
 #ifdef _WIN32
 
-#include <assert.h>
-#include <ctype.h>
 #include <Windows.h>
 
 #define PLAT "windows"
@@ -334,33 +347,16 @@ static int Lutf8_base(lua_State *L) { return lua_gettop(L); }
 #undef Lansi
 #undef Lisabs
 #undef Lnormcase
-#undef Lsplitdrive
 #undef Lutf8
 #undef joinpath_impl
 #undef normpath_impl
 #undef relpath_impl
+#undef splitdrive_impl
 
-static int normpath_impl(lua_State *L, const char *s, size_t len) {
-    if (len > 2 && isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
-        /* UNC path? */
-        lua_pushlstring(L, s, len);
-        return 1;
-    }
-    if (isalpha(s[0]) && s[1] == ':') { /* with drive letter? */
-        lua_pushfstring(L, "%c:", toupper(*s));
-        normpath_base(L, s + 2, len);
-        lua_concat(L, 2);
-        return 1;
-    }
-    else if (len > 4 &&
-            isdirsep(s[0]) && isdirsep(s[1]) && s[2] == '?' && isdirsep(s[3])) {
-        /* externed path? */
-        lua_pushliteral(L,  DIR_SEP);
-        normpath_base(L, s+1, len-1);
-        lua_concat(L, 2);
-        return 1;
-    }
-    return normpath_base(L, s, len);
+static const char *next_dirsep(const char *p) {
+    while (*p != '\0' && !isdirsep(*p))
+        ++p;
+    return *p == '\0' ? NULL : p;
 }
 
 static int splitdrive_impl(lua_State *L, const char *s, size_t len) {
@@ -371,22 +367,31 @@ static int splitdrive_impl(lua_State *L, const char *s, size_t len) {
          * \\machine\mountpoint\directory\etc\...
          *           directory ^^^^^^^^^^^^^^^
          */
-        if (((mp = strchr(s+2, DIR_SEP_CHAR)) == NULL
-                    && (mp = strchr(s+2, ALT_SEP_CHAR)) == NULL)
-                || isdirsep(mp[1])) {
+        if ((mp = next_dirsep(s + 2)) == NULL || isdirsep(mp[1])) {
             /* a UNC path can't have two slashes in a row
                (after the initial two) */
             lua_pushliteral(L, "");
             lua_insert(L, -2);
             return 2;
         }
-        if ((mp2 = strchr(mp+2, DIR_SEP_CHAR)) == NULL
-                && (mp2 = strchr(mp+2, ALT_SEP_CHAR)) == NULL) {
+        if ((mp2 = next_dirsep(mp + 2)) == NULL) {
             lua_pushlstring(L, s, len);
             lua_pushliteral(L, "");
             return 2;
         }
-        lua_pushlstring(L, s, mp2-s);
+        if (s[0] != ALT_SEP_CHAR && s[1] != ALT_SEP_CHAR
+                && *mp != ALT_SEP_CHAR)
+            lua_pushlstring(L, s, mp2 - s);
+        else {
+            luaL_Buffer b;
+            luaL_buffinit(L, &b);
+            luaL_addchar(&b, '\\');
+            luaL_addchar(&b, '\\');
+            luaL_addlstring(&b, s + 2, mp - s - 2);
+            luaL_addchar(&b, '\\');
+            luaL_addlstring(&b, mp+1, mp2 - mp - 1);
+            luaL_pushresult(&b);
+        }
         lua_pushlstring(L, mp2, len-(mp2-s));
         return 2;
     }
@@ -400,10 +405,18 @@ static int splitdrive_impl(lua_State *L, const char *s, size_t len) {
     return 2;
 }
 
+static int normpath_impl(lua_State *L, const char *s, size_t len) {
+    splitdrive_impl(L, s, len);
+    s = lua_tolstring(L, -1, &len);
+    normpath_base(L, s, len);
+    lua_remove(L, -2);
+    lua_concat(L, 2);
+    return 1;
+}
+
 static int drive_equal(const char *d1, const char *d2, int *same_case) {
     int issame = 1;
-    while (*d1 != '\0' && *d2 != '\0'
-            && tolower(*d1) == tolower(*d2)) {
+    while (*d1 != '\0' && *d2 != '\0' && fn_equal(*d1, *d2)) {
         if (*d1 != *d2) issame = 0;
         ++d1, ++d2;
     }
@@ -429,11 +442,10 @@ static int relpath_impl(lua_State *L, const char *fn, const char *path) {
     return relpath_base(L, fn, path);
 }
 
-static int joinpath_impl(lua_State *L) {
+static int joinpath2(lua_State *L, int top) {
     size_t dlen, len;
     const char *d, *s = luaL_checklstring(L, 1, &len);
-    int i, top = lua_gettop(L);
-    override_base(joinpath);
+    int i;
     splitdrive_impl(L, s, len); /* drive(d) */
     d = lua_tolstring(L, top+1, &dlen);
     for (i = 2; i <= top; ++i) {
@@ -476,6 +488,11 @@ static int joinpath_impl(lua_State *L) {
         lua_replace(L, top+2);
         lua_pop(L, 2); /* pop drive and path */
     }
+    return 2;
+}
+
+static int joinpath_impl(lua_State *L) {
+    joinpath2(L, lua_gettop(L));
     lua_concat(L, 2); /* concat drive and path */
     return 1;
 }
@@ -575,7 +592,6 @@ static int Lansi(lua_State *L) {
     if (lua_isstring(L, 1)) {
         const char *utf8 = luaL_checkstring(L, 1);
         LPCWSTR ws = push_widechar(L, utf8, CP_UTF8);
-        override_base(Lansi);
         push_multibyte(L, ws, CP_ACP);
         return 1;
     }
@@ -588,7 +604,6 @@ static int Lutf8(lua_State *L) {
     if (lua_isstring(L, 1)) {
         const char *ansi = luaL_checkstring(L, 1);
         LPCWSTR ws = push_widechar(L, ansi, CP_ACP);
-        override_base(Lutf8);
         push_multibyte(L, ws, CP_UTF8);
         return 1;
     }
@@ -604,9 +619,9 @@ static int push_lasterror(lua_State *L, const char *title, const char *fn) {
 }
 
 static int Lplatform(lua_State *L) {
-    OSVERSIONINFO ver;
+    OSVERSIONINFOW ver;
     ver.dwOSVersionInfoSize = sizeof(ver);
-    if (!GetVersionEx(&ver))
+    if (!GetVersionExW(&ver))
         return push_lasterror(L, "platform", NULL);
     lua_pushfstring(L, "Windows %d.%d Build %d",
             ver.dwMajorVersion,
@@ -677,7 +692,7 @@ static DWORD WINAPI init_GetFinalPathNameByHandleW(
   _In_   DWORD cchFilePath,
   _In_   DWORD dwFlags) {
     HMODULE hModule;
-    hModule = GetModuleHandleW(L"kernel32.dll");
+    hModule = GetModuleHandleA("KERNEL32.dll");
     pGetFinalPathNameByHandleW = (PGetFinalPathNameByHandleW*)GetProcAddress(
             hModule, "GetFinalPathNameByHandleW");
     if (pGetFinalPathNameByHandleW == NULL)
@@ -685,8 +700,7 @@ static DWORD WINAPI init_GetFinalPathNameByHandleW(
     return pGetFinalPathNameByHandleW(hFile, lpszFilePath, cchFilePath, dwFlags);
 }
 
-static int Labs(lua_State *L) {
-    const char *s = check_pathcomps(L, NULL);
+static int abs_impl(lua_State *L, const char *s) {
     LPCWSTR ws = push_pathW(L, s);
     WCHAR buff[MAX_PATH];
     LPWSTR p = buff;
@@ -700,10 +714,9 @@ static int Labs(lua_State *L) {
     return 1;
 }
 
-static int Lrealpath_impl(lua_State *L) {
+static int realpath_impl(lua_State *L, const char *s) {
     WCHAR buff[MAX_PATH], *p = buff;
     DWORD bytes;
-    const char *s = check_pathcomps(L, NULL);
     LPCWSTR ws = push_pathW(L, s);
     HANDLE hFile = CreateFileW(ws, /* file to open         */
             0,                     /* open only for handle */
@@ -723,7 +736,7 @@ static int Lrealpath_impl(lua_State *L) {
     CloseHandle(hFile);
     if (bytes == 0) {
         if (pGetFinalPathNameByHandleW == NULL)
-            return Labs(L);
+            return abs_impl(L, s);
         return push_lasterror(L, "realpath", s);
     }
     if (bytes - 4 > MAX_PATH)
@@ -734,9 +747,10 @@ static int Lrealpath_impl(lua_State *L) {
 }
 
 static int Lrealpath(lua_State *L) {
+    const char *s = check_pathcomps(L, NULL);
     if (pGetFinalPathNameByHandleW == NULL)
-        return Labs(L);
-    return Lrealpath_impl(L);
+        return abs_impl(L, s);
+    return realpath_impl(L, s);
 }
 
 static int Lnormcase(lua_State *L) {
@@ -744,7 +758,7 @@ static int Lnormcase(lua_State *L) {
     const char *s;
     size_t i, start = 0;
     luaL_Buffer b;
-    Lnormcase_base(L);
+    Lnormcase_def(L);
     s = lua_tolstring(L, -1, &len);
     luaL_buffinit(L, &b);
     if (s[1] == ':')
@@ -758,7 +772,6 @@ static int Lnormcase(lua_State *L) {
 static int Lisabs(lua_State *L) {
     size_t len;
     const char *s = check_pathcomps(L, &len);
-    override_base(Lisabs);
     if (isdirsep(s[0]) && isdirsep(s[1]) && !isdirsep(s[2])) {
         const char *mp, *mp2;
         lua_pushboolean(L,
@@ -773,13 +786,6 @@ static int Lisabs(lua_State *L) {
     else
         lua_pushboolean(L, isdirsep(s[0]));
     return 1;
-}
-
-static int Lsplitdrive(lua_State *L) {
-    size_t len;
-    const char *s = check_pathcomps(L, &len);
-    override_base(Lsplitdrive);
-    return splitdrive_impl(L, s, len);
 }
 
 static int Lexpandvars(lua_State *L) {
@@ -1121,7 +1127,6 @@ static int Lrename(lua_State *L) {
 
 #elif defined(_POSIX_SOURCE) || defined(__ANDROID__)
 
-#include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -1193,10 +1198,10 @@ static int Lsetenv(lua_State *L) {
 
 /* path utils */
 
-static int Labs(lua_State *L) {
-    size_t len;
-    const char *s = check_pathcomps(L, &len);
+static int abs_impl(lua_State *L, const char *s) {
+    assert(lua_gettop(L) == 1);
     if (!isdirsep(s[0])) { /* abspath? */
+        size_t len;
         char buff[PATH_MAX];
         if (getcwd(buff, PATH_MAX) == NULL)
             return push_lasterror(L, "getcwd", s);
@@ -1589,6 +1594,7 @@ static int LNYI(lua_State *L) {
 
 #define NYI_impl(n,arg) static int n##_impl arg { return LNYI(L); }
 NYI_impl(dir,      (lua_State *L, DirData *d, const char *s))
+NYI_impl(abs,      (lua_State *L, const char *s))
 NYI_impl(exists,   (lua_State *L, const char *s))
 NYI_impl(isdir,    (lua_State *L, const char *s))
 NYI_impl(chdir,    (lua_State *L, const char *s))
@@ -1598,7 +1604,6 @@ NYI_impl(remove,   (lua_State *L, const char *s))
 #undef NYI_impl
 
 #define NYI_impl(n) static int L##n(lua_State *L) { return LNYI(L); }
-NYI_impl(abs)
 NYI_impl(cmpftime)
 NYI_impl(copy)
 NYI_impl(expandvars)
@@ -1621,6 +1626,7 @@ static const char *check_pathcomps(lua_State *L, size_t *psz) {
     int top = lua_gettop(L);
     if (top == 0) {
         if (psz) *psz = 1;
+        lua_pushstring(L, ".");
         return ".";
     }
     if (top > 1) {
@@ -1631,10 +1637,9 @@ static const char *check_pathcomps(lua_State *L, size_t *psz) {
     return lua_tolstring(L, 1, psz);
 }
 
-static int Lnormpath(lua_State *L) {
-    size_t len;
-    const char *s = check_pathcomps(L, &len);
-    return normpath_impl(L, s, len);
+static int Labs(lua_State *L) {
+    const char *s = check_pathcomps(L, NULL);
+    return abs_impl(L, s);
 }
 
 static int Lrel(lua_State *L) {
@@ -1649,13 +1654,36 @@ static int Lrel(lua_State *L) {
 }
 
 static int Ljoin(lua_State *L) {
-    return joinpath_impl(L);
+    size_t len;
+    const char *s;
+#ifdef _WIN32 /* special optimation for Windows */
+    int top = lua_gettop(L);
+    if (top == 0) {
+        lua_pushstring(L, ".");
+        return 1;
+    }
+    joinpath2(L, top);
+    s = lua_tolstring(L, -1, &len);
+    normpath_base(L, s, len);
+    lua_remove(L, -2);
+    lua_concat(L, 2);
+#else
+    s = check_pathcomps(L, &len);
+    normpath_impl(L, s, len);
+#endif
+    return 1;
 }
 
 static int Lsplit(lua_State *L) {
     size_t len;
     const char *s = check_pathcomps(L, &len);
     return splitpath_impl(L, s, len);
+}
+
+static int Lsplitdrive(lua_State *L) {
+    size_t len;
+    const char *s = check_pathcomps(L, &len);
+    return splitdrive_impl(L, s, len);
 }
 
 static int Lsplitext(lua_State *L) {
@@ -1741,7 +1769,7 @@ static int fnmatch(const char *pattern, const char *s, size_t len) {
             }
             /* fall though */
         default:
-            if (*pattern != *s)
+            if (!fn_equal(*pattern, *s))
                 return 0;
             ++pattern, ++s;
         }
@@ -1920,7 +1948,7 @@ static int itercomp_iter(lua_State *L) {
         while (s[pend] != '\0' && s[pend] != DIR_SEP_CHAR)
             ++pend;
         if (pend == p) return 0;
-        lua_pushinteger(L, pend + 1);
+        lua_pushinteger(L, pend + (s[pend] != '\0'));
         lua_replace(L, lua_upvalueindex(1));
         lua_pushlstring(L, &s[p], pend - p);
     }
@@ -2018,7 +2046,6 @@ LUALIB_API int luaopen_path(lua_State *L) {
         ENTRY(itercomp),
         ENTRY(join),
         ENTRY(normcase),
-        ENTRY(normpath),
         ENTRY(realpath),
         ENTRY(rel),
         ENTRY(split),

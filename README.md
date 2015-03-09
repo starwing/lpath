@@ -166,10 +166,6 @@ Functions:
 > normalize the case of path, only useful on Windows, on other system
 > this function does nothing.
 
-- `path.normpath([comp]) -> string`
-> this function normalize path. On Windows this function handle drive
-> volume and UNC path.
-
 - `path.realpath([comp]) -> path`
 > return the real path after all symbolic link resolved. On Windows, on
 > systems before Vista this function is same as path.abs(), but after
