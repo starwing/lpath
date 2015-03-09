@@ -192,8 +192,15 @@ lp_unused int joinpath_base(lua_State *L) {
     for (i = 1; i <= top; ++i) {
         size_t len;
         const char *s = luaL_checklstring(L, i, &len);
-        if (isdirsep(*s)) /* absolute path? */
+        if (isdirsep(*s)) { /* absolute path? reset buffer */
+#if LUA_VERSION_NUM >= 502
             b.n = 0; /* reset buffer */
+#else
+            luaL_pushresult(&b);
+            lua_pop(L, 1);
+            luaL_buffinit(L, &b);
+#endif
+        }
         if (i == top)
             lua_pushvalue(L, top);
         else
