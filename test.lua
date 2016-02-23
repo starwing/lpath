@@ -59,7 +59,6 @@ add_test("itercomp", function ()
       local i = 1
       local t = "abcdef"
       for comp in path.itercomp(s) do
-         print(comp)
          if p then
             assert(comp == p)
             p = p ~= info.sep and info.sep
