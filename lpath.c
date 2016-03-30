@@ -20,7 +20,7 @@ static void *luaL_prepbuffsize(luaL_Buffer *B, size_t len) {
     return luaL_prepbuffer(B);
 }
 # define luaL_resetbuffer(L, B) \
-    (luaL_pushresult(&(B)),lua_pop((L),1),luaL_buffinit((L),(B)))
+    (luaL_pushresult((B)),lua_pop((L),1),luaL_buffinit((L),(B)))
 #else
 # define luaL_resetbuffer(L, B) ((B)->n = 0)
 #endif
