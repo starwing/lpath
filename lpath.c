@@ -280,7 +280,7 @@ static int push_lasterror(lua_State *L, const char *title, const char *fn);
 static int Lsetenv(lua_State *L);
 /* path utils */
 static int abs_impl(lua_State *L, const char *s);
-static int Lexpand(lua_State *L);
+static int Lexpandvars(lua_State *L);
 static int Lrealpath(lua_State *L);
 /* dir utils */
 static void dir_close(DirData *d);
@@ -803,7 +803,7 @@ static int Lisabs(lua_State *L) {
     return 1;
 }
 
-static int Lexpand(lua_State *L) {
+static int Lexpandvars(lua_State *L) {
     luaL_Buffer B;
     size_t len;
     const char *s = check_pathcomps(L, &len);
@@ -815,7 +815,7 @@ static int Lexpand(lua_State *L) {
         buff = (LPWSTR)luaL_prepbuffsize(&B, bytes*sizeof(WCHAR));
         bytes = ExpandEnvironmentStringsW(ws, buff, bytes);
     }
-    if (bytes == 0) return push_lasterror(L, "expand", NULL);
+    if (bytes == 0) return push_lasterror(L, "expandvars", NULL);
     push_pathA(L, buff);
     return 1;
 }
@@ -1158,7 +1158,7 @@ static int Lrename(lua_State *L) {
 }
 
 
-#elif defined(_POSIX_SOURCE) || defined(__ANDROID__)
+#elif defined(_POSIX_SOURCE) || defined(__ANDROID__) || defined(__APPLE__)
 
 #include <ctype.h>
 #include <dirent.h>
@@ -1253,7 +1253,7 @@ static int abs_impl(lua_State *L, const char *s) {
     return 1;
 }
 
-static int Lexpand(lua_State *L) {
+static int Lexpandvars(lua_State *L) {
 #ifdef __ANDROID__
     return luaL_error(L, "expandvars not support on Android");
 #else
@@ -1670,6 +1670,7 @@ NYI_impl(expandvars)
 NYI_impl(fsize)
 NYI_impl(ftime)
 NYI_impl(getcwd)
+NYI_impl(binpath)
 NYI_impl(realpath)
 NYI_impl(rename)
 NYI_impl(setenv)
@@ -2093,7 +2094,7 @@ LUALIB_API int luaopen_path(lua_State *L) {
 #define ENTRY(n) { #n, L##n }
         ENTRY(abs),
         ENTRY(ansi),
-        ENTRY(expand),
+        ENTRY(expandvars),
         ENTRY(isabs),
         ENTRY(itercomp),
         ENTRY(join),
