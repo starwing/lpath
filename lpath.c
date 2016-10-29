@@ -1694,8 +1694,9 @@ static const char *check_pathcomps(lua_State *L, size_t *psz) {
         joinpath_impl(L);
         lua_replace(L, 1);
         lua_settop(L, 1);
+        return lua_tolstring(L, 1, psz);
     }
-    return lua_tolstring(L, 1, psz);
+    return luaL_checklstring(L, 1, psz);
 }
 
 static int Labs(lua_State *L) {
