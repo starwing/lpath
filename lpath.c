@@ -295,6 +295,7 @@ static int Lplatform(lua_State *L);
 static int Ltype(lua_State *L);
 /* file utils */
 static int exists_impl(lua_State *L, const char *s);
+static int existdirs_impl(lua_State* L, const char* s);
 static int remove_impl(lua_State *L, const char *s);
 static int Lcmpftime(lua_State *L);
 static int Lcopy(lua_State *L);
@@ -312,7 +313,7 @@ lp_base int Lisabs_base(lua_State *L) {
 }
 
 lp_base const char *splitdrive_base(const char *s, size_t len)
-{ return s; } 
+{ return s; }
 
 lp_base int pushdrive_base(lua_State *L, const char *d, size_t len)
 { lua_pushlstring(L, d, len); return 1; }
@@ -1038,6 +1039,22 @@ static int exists_impl(lua_State *L, const char *s) {
     return hFile != INVALID_HANDLE_VALUE;
 }
 
+static BOOL FindFirstFileExists(LPCWSTR lpPath, DWORD dwFilter) {
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(lpPath, &fd);
+    BOOL bFilter = (FALSE == dwFilter) ? TRUE : fd.dwFileAttributes & dwFilter;
+    BOOL RetValue = ((hFind != INVALID_HANDLE_VALUE) && bFilter) ? TRUE : FALSE;
+    FindClose(hFind);
+    return RetValue;
+}
+
+static int existdirs_impl(lua_State* L, const char* s) {
+    LPCWSTR ws = push_pathW(L, s);
+    int ret = FindFirstFileExists(ws, FILE_ATTRIBUTE_DIRECTORY);
+    lua_pop(L, 1);
+    return ret;
+}
+
 static int remove_impl(lua_State *L, const char *s) {
     LPCWSTR ws = push_pathW(L, s);
     BOOL ret = DeleteFileW(ws);
@@ -1501,6 +1518,14 @@ static int exists_impl(lua_State *L, const char *s) {
     return stat(s, &buf) == 0;
 }
 
+static int existdirs_impl(lua_State* L, const char* s) {
+    DIR* dp;
+    if ((dp = opendir(s)) == NULL)
+        return 0;
+    closedir(dp);
+    return 1;
+}
+
 static int remove_impl(lua_State *L, const char *s) {
     if (remove(s) != 0)
         return push_lasterror(L, "remove", s);
@@ -1656,6 +1681,7 @@ static int LNYI(lua_State *L) {
 NYI_impl(dir,      (lua_State *L, DirData *d, const char *s))
 NYI_impl(abs,      (lua_State *L, const char *s))
 NYI_impl(exists,   (lua_State *L, const char *s))
+NYI_impl(existdirs, (lua_State* L, const char* s))
 NYI_impl(isdir,    (lua_State *L, const char *s))
 NYI_impl(chdir,    (lua_State *L, const char *s))
 NYI_impl(mkdir,    (lua_State *L, const char *s))
@@ -1894,6 +1920,11 @@ static int Lexists(lua_State *L) {
     return 1;
 }
 
+static int Lexistdirs(lua_State* L) {
+    lua_pushboolean(L, existdirs_impl(L, check_pathcomps(L, NULL)));
+    return 1;
+}
+
 static int makedirs_impl(lua_State *L, const char *s, size_t len) {
     /* XXX currently need not maintain the balance of stack: do not
      * used other place.  */
@@ -2078,7 +2109,7 @@ static int Lwalk(lua_State *L) {
     else
         lua_pushfstring(L, "%s%s", lua_tostring(L, -3), DIR_SEP); /* 4 */
     dir_impl(L, dirdata_new(L), s); /* ... path iter table path iter dirdata */
-    lua_rawseti(L, -4, 3); 
+    lua_rawseti(L, -4, 3);
     lua_rawseti(L, -3, 2);
     if (iscurdir(s)) {
         lua_pop(L, 1);
@@ -2124,6 +2155,7 @@ LUALIB_API int luaopen_path_fs(lua_State *L) {
         ENTRY(copy),
         ENTRY(dir),
         ENTRY(exists),
+        ENTRY(existdirs),
         ENTRY(fnmatch),
         ENTRY(fsize),
         ENTRY(ftime),
