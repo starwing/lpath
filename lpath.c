@@ -39,6 +39,9 @@ static void *luaL_prepbuffsize(luaL_Buffer *B, size_t len) {
 #  define EXT_SEP  "."
 #  define PAR_DIR  ".."
 #  define PATH_SEP ";"
+// Redefine _In_ and _Out_ to empty values
+#  define _In_
+#  define _Out_
 #else
 #  define ALT_SEP  "/"
 #  define CUR_DIR  "."
