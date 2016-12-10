@@ -1692,7 +1692,7 @@ NYI_impl(rename)
 NYI_impl(setenv)
 NYI_impl(touch)
 NYI_impl(type)
-NYI_impl(tmpdirs)
+NYI_impl(tmpdir)
 #undef NYI_impl
 
 #endif
@@ -2119,7 +2119,7 @@ static int fmtmagic(int x, char nums[]) {
     *num_cnt = '\0';
 }
 
-static int Ltmpdirs(lua_State* L) {
+static int Ltmpdir(lua_State* L) {
     char nums[20];  //big enough to save numbers
     char tmp_root[255];
 
@@ -2197,7 +2197,7 @@ LUALIB_API int luaopen_path_fs(lua_State *L) {
         ENTRY(setenv),
         ENTRY(touch),
         ENTRY(walk),
-        ENTRY(tmpdirs),
+        ENTRY(tmpdir),
 #undef  ENTRY
         { NULL, NULL }
     };
