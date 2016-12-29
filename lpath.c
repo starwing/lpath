@@ -40,6 +40,8 @@ static void *luaL_prepbuffsize(luaL_Buffer *B, size_t len) {
 #  define PATH_SEP ";"
 #  define TMP_PREFIX "lua_"
 // Redefine _In_ and _Out_ to empty values
+#  undef  _In_
+#  undef  _Out_
 #  define _In_
 #  define _Out_
 #else
@@ -53,7 +55,7 @@ static void *luaL_prepbuffsize(luaL_Buffer *B, size_t len) {
 #  define TMP_PREFIX "lua_"
 #endif
 
-#define TMP_MAGIC_MAX 100000
+#define TMP_MAGIC_MAX 1000000
 
 
 /* path algorithms */
@@ -295,11 +297,11 @@ static int isdir_impl(lua_State *L, const char *s);
 static int chdir_impl(lua_State *L, const char *s);
 static int mkdir_impl(lua_State *L, const char *s);
 static int rmdir_impl(lua_State *L, const char *s);
+static int tmproot_impl(lua_State *L);
 static int walkpath_dfs(WalkState* S);
 static int Lgetcwd(lua_State *L);
 static int Lplatform(lua_State *L);
 static int Ltype(lua_State *L);
-static int gettmproot_impl(char* s);
 /* file utils */
 static int exists_impl(lua_State *L, const char *s);
 static int remove_impl(lua_State *L, const char *s);
@@ -1029,15 +1031,14 @@ static int Ltype(lua_State *L) {
     return 1;
 }
 
-static int gettmproot_impl(char* s) {
+static int tmproot_impl(lua_State *L) {
     const char* tmp = getenv("TEMP");
-    if (tmp != NULL)
-        strcpy(s, tmp);
-    else {
-        strcpy(s, getenv("WINDIR"));
-        strcat(s, "\\TEMP");
+    if (tmp != NULL) {
+        lua_pushstring(L, tmp);
+        return 1;
     }
-    return 0;
+    lua_pushfstring(L, "%s\\TEMP", getenv("WINDIR"));
+    return 1;
 }
 
 /* file utils */
@@ -1635,7 +1636,10 @@ static int Lrename(lua_State *L) {
     return 1;
 }
 
-static int gettmproot_impl(char* s) { strcpy(s, "/tmp"); return 0; }
+static int tmproot_impl(char* s) {
+    lua_pushstring(L, "/tmp");
+    return 1;
+}
 
 #else
 
@@ -1908,6 +1912,7 @@ static int Lchdir(lua_State *L) { return unary_func(L, chdir_impl); }
 static int Lmkdir(lua_State *L) { return unary_func(L, mkdir_impl); }
 static int Lrmdir(lua_State *L) { return unary_func(L, rmdir_impl); }
 static int Lremove(lua_State *L) { return unary_func(L, remove_impl); }
+static int Ltmproot(lua_State* L) { return tmproot_impl(L); }
 
 static int Lexists(lua_State *L) {
     lua_pushboolean(L, exists_impl(L, check_pathcomps(L, NULL)));
@@ -2108,44 +2113,19 @@ static int Lwalk(lua_State *L) {
     return 2;
 }
 
-static int fmtmagic(int x, char nums[]) {
-    int i;
-    char* num_cnt = &nums[0];
-
-    strcpy(nums, TMP_PREFIX);
-    while (*num_cnt) num_cnt++;
-
-    for (i = TMP_MAGIC_MAX / 10; i > 0; i /= 10, num_cnt++) {
-        *num_cnt = x / i + 48;
-        x %= i;
-    }
-    *num_cnt = '\0';
-}
-
 static int Ltmpdir(lua_State* L) {
-    char nums[20];  //big enough to save numbers
-    char tmp_root[255];
-
-    gettmproot_impl(tmp_root);
-
+    int exists = 1, nrets;
+    tmproot_impl(L);
     srand((int)&L);
-
-    int exists = 0;
-    do {
-        int magic = rand() % TMP_MAGIC_MAX;
-        fmtmagic(magic, nums);
-
-        lua_pushstring(L, tmp_root);
-        lua_pushstring(L, nums);
-        Lexists(L);
-        exists = lua_toboolean(L, -1);
-        lua_pop(L, 2);
-    } while (exists);
-
-    lua_pushstring(L, tmp_root);
-    lua_pushstring(L, nums);
-    Lmkdir(L);
-
+    while (exists) {
+        int magic = (rand()<<16|rand()) % TMP_MAGIC_MAX;
+        lua_pushfstring(L, "%s" DIR_SEP TMP_PREFIX "%d",
+                lua_tostring(L, -1), magic);
+        exists = exists_impl(L, lua_tostring(L, -1));
+        if (exists) lua_pop(L, 1);
+    }
+    if ((nrets = mkdir_impl(L, lua_tostring(L, -1))) != 0)
+        return nrets;
     return 1;
 }
 
@@ -2200,6 +2180,7 @@ LUALIB_API int luaopen_path_fs(lua_State *L) {
         ENTRY(setenv),
         ENTRY(touch),
         ENTRY(walk),
+        ENTRY(tmproot),
         ENTRY(tmpdir),
 #undef  ENTRY
         { NULL, NULL }
