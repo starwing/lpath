@@ -2,7 +2,7 @@ language: c
 
 env:
   global:
-    - LUAROCKS=2.2.0
+    - LUAROCKS=2.4.2
     - ROCKSPEC=rockspecs/lpath-scm-0.rockspec
   matrix:
     - LUA=lua5.1
