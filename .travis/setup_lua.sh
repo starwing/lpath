@@ -41,12 +41,10 @@ if [ "$LUAJIT" == "yes" ]; then
 
   make && sudo make install
 
-  if [ "$LUA" == "luajit2.1" ]; then
-    sudo ln -s /usr/local/bin/luajit-2.1.0-alpha /usr/local/bin/luajit
-    sudo ln -s /usr/local/bin/luajit /usr/local/bin/lua;
-  else
-    sudo ln -s /usr/local/bin/luajit /usr/local/bin/lua;
+  if [ "$LUA" == "luajit2.1" -o "$LUA" == "luajit" ]; then
+    sudo ln -sf /usr/local/bin/luajit-2.1.0-beta2 /usr/local/bin/luajit;
   fi;
+  sudo ln -sf /usr/local/bin/luajit /usr/local/bin/lua;
 
 else
   if [ "$LUA" == "lua5.1" ]; then
@@ -69,7 +67,7 @@ curl http://luarocks.github.io/luarocks/releases/$LUAROCKS_BASE.tar.gz | tar xz
 cd $LUAROCKS_BASE
 
 if [ "$LUA" == "luajit" ]; then
-  ./configure --lua-suffix=jit --with-lua-include=/usr/local/include/luajit-2.0;
+  ./configure --lua-suffix=jit --with-lua-include=/usr/local/include/luajit-2.1;
 elif [ "$LUA" == "luajit2.0" ]; then
   ./configure --lua-suffix=jit --with-lua-include=/usr/local/include/luajit-2.0;
 elif [ "$LUA" == "luajit2.1" ]; then

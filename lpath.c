@@ -15,9 +15,18 @@ LP_NS_BEGIN
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#if LUA_VERSION_NUM < 502
+#if LUA_VERSION_NUM >= 503
+# define lua53_rawgetp lua_rawgetp
+#elif LUA_VERSION_NUM == 502
+static int lua53_rawgetp(lua_State *L, int idx, const void *p)
+{ lua_rawgetp(L, idx, p); return lua_type(L, -1); }
+#else
 # define lua_rawlen          lua_objlen
 # define luaL_newlib(L,libs) luaL_register(L, lua_tostring(L, 1), libs);
+static int lua53_rawgetp(lua_State *L, int idx, const void *p)
+{ lua_pushlightuserdata(L, p); lua_rawget(L, idx); return lua_type(L, -1); }
+static int lua_rawsetp(lua_State *L, int idx, const void *p)
+{ lua_pushlightuserdata(L, p); lua_insert(L, -2); lua_rawset(L, idx); }
 #endif
 
 
@@ -83,7 +92,7 @@ static int lpL_delstate(lua_State *L) {
 
 static lp_State *lp_getstate(lua_State *L) {
     lp_State *S;
-    if (lua_rawgetp(L, LUA_REGISTRYINDEX, LP_STATE_KEY) != LUA_TUSERDATA) {
+    if (lua53_rawgetp(L, LUA_REGISTRYINDEX, LP_STATE_KEY) != LUA_TUSERDATA) {
         S = (lp_State*)lua_newuserdata(L, sizeof(lp_State));
         memset(S, 0, sizeof(lp_State));
         lua_createtable(L, 0, 1);
