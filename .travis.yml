@@ -1,31 +1,34 @@
 language: c
+sudo: false
 
 env:
   global:
     - LUAROCKS=2.4.2
     - ROCKSPEC=rockspecs/lpath-scm-0.rockspec
   matrix:
-    - LUA=lua5.1
-    - LUA=lua5.2
-    - LUA=lua5.3
-    - LUA=luajit
-    # - LUA=luajit2.0
-    # - LUA=luajit2.1
+    - LUA="lua 5.1"
+    - LUA="lua 5.2"
+    - LUA="lua 5.3"
+    - LUA="luajit 2.0"
+    - LUA="luajit 2.1"
 
 branches:
   only:
     - master
 
 before_install:
-  - travis_retry bash .travis/setup_lua.sh
-  # - sudo pip install cpp-coveralls
-  # - sudo luarocks install Lua-cURL         --server=https://rocks.moonscript.org/dev
-  # - sudo luarocks install luacov-coveralls --server=https://rocks.moonscript.org/dev
-  # - sudo luarocks install lunitx
+  - pip install --user hererocks
+  - hererocks env --$LUA -rlatest    # Use latest LuaRocks, install into 'env' directory.
+  - source env/bin/activate          # Add directory with all installed binaries to PATH.
+  # - luarocks install busted
+  # - pip install cpp-coveralls
+  # - luarocks install Lua-cURL         --server=https://rocks.moonscript.org/dev
+  # - luarocks install luacov-coveralls --server=https://rocks.moonscript.org/dev
+  # - luarocks install lunitx
 
 install:
   # - sudo luarocks make $ROCKSPEC CFLAGS="-O2 -fPIC -ftest-coverage -fprofile-arcs" LIBFLAG="-shared --coverage"
-  - sudo luarocks make $ROCKSPEC CFLAGS="-O2 -fPIC" LIBFLAG="-shared"
+  - luarocks make $ROCKSPEC CFLAGS="-O2 -fPIC" LIBFLAG="-shared"
 
 script: 
   - lua -e "print(require'path.info'.version)"
