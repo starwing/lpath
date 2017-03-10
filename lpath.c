@@ -600,7 +600,7 @@ static int lpL_platform(lua_State *L) {
     { ret = -ret; goto out; }
     build = wcstoul((WCHAR*)lp_buffer(S), NULL, 10);
     if (RegQueryValueExW(hkey, L"CurrentMajorVersionNumber",
-                NULL, NULL, (LPBYTE)&major, &size) != ERROR_SUCCESS 
+                NULL, NULL, (LPBYTE)&major, &size) != ERROR_SUCCESS
             || RegQueryValueExW(hkey, L"CurrentMinorVersionNumber",
                 NULL, NULL, (LPBYTE)&minor, &size) != ERROR_SUCCESS) {
         if ((ret = lp_readreg(S, hkey, L"CurrentVersion")) < 0)
@@ -863,17 +863,17 @@ static int lpL_tmpdir(lua_State* L) {
     if (GetTempPathW(MAX_PATH + 1, tmpdir) == 0)
         return lp_pusherror(L, "tmpdir", NULL);
     lua_pushstring(L, lp_addmultibyte(S, tmpdir));
-    lua_settop(L, 1);
+    lua_remove(L, -2);
     s = lua_tostring(L, -1);
     srand((int)(ptrdiff_t)&L);
     do {
         int magic = ((unsigned)rand()<<16|rand()) % LP_MAX_TMPNUM;
-        lua_settop(L, 2);
+        lua_settop(L, 3);
         lua_pushfstring(L, "%s" LP_DIRSEP "%s%d", s, prefix, magic);
         lp_setbuffer(S, 0);
     } while (GetFileAttributesW(lp_addwidechar(S, lua_tostring(L, -1))) !=
             INVALID_FILE_ATTRIBUTES);
-    if (!CreateDirectoryW((WCHAR*)lp_buffer(S), NULL))
+    if (!CreateDirectoryW(lp_addwidechar(S, lua_tostring(L, -1)), NULL))
         return lp_pusherror(L, "tmpdir", lp_addmultibyte(S, NULL));
     return 1;
 }
@@ -1565,7 +1565,7 @@ static const char *classend(const char *p) {
 
 static int matchclass(int c, const char *p, const char *ec) {
     int sig = 1;
-    if (*(p+1) == '^') { sig = 0; p++; }  /* skip the '^' */ 
+    if (*(p+1) == '^') { sig = 0; p++; }  /* skip the '^' */
     while (++p < ec) {
         int b = *p, e = p[1] != '-' && p+2<ec ? *p : *(p += 2);
         if (b <= c && c <= e)
