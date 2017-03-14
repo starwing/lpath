@@ -863,7 +863,6 @@ static int lpL_tmpdir(lua_State* L) {
     if (GetTempPathW(MAX_PATH + 1, tmpdir) == 0)
         return lp_pusherror(L, "tmpdir", NULL);
     lua_pushstring(L, lp_addmultibyte(S, tmpdir));
-    lua_remove(L, -2);
     s = lua_tostring(L, -1);
     srand((int)(ptrdiff_t)&L);
     do {
