@@ -212,6 +212,7 @@ test "rel" {
       eq(path.rel("c:a", "c:b"), [[C:..\a]])
       eq(path.rel("c:a", "d:b"), [[C:a]])
       eq(path.rel("c:/a", "d:b"), [[C:\a]])
+      assert(fs.chdir "c:/")
       eq(path.rel("c:/a", path.abs"c:b"), [[C:..\a]])
    end;
 
