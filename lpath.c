@@ -952,6 +952,7 @@ static int lp_makedirs(lua_State *L, const char *s) {
 
 static int rmdir_walker(lp_State *S, void *ud, const char *s, int state) {
     LPCWSTR ws = lp_addwidechar(S, s);
+    (void)ud;
     if (state == LP_WALKIN)
         return 1;
     if (state == LP_WALKFILE && !DeleteFileW(ws))
@@ -1643,6 +1644,7 @@ typedef struct GlobState {
 
 static int glob_walker(lp_State *S, void *ud, const char *s, int state) {
     GlobState *gs = (GlobState*)ud;
+    (void)S;
     if (lp_iscurdir(s)) {
         s += LP_CURDIRLEN;
         while (lp_isdirsep(*s)) ++s;
@@ -1958,7 +1960,7 @@ LUALIB_API int luaopen_path_info(lua_State *L) {
 
 LP_NS_END
 
-/* cc: flags+='-fprofile-arcs -ftest-coverage' run='lua test.lua'
+/* cc: flags+='-Wextra --coverage' run='lua test.lua'
  * unixcc: flags+='-s -O3 -shared -fPIC' output='path.so'
  * win32cc: flags+='-s -O3 -mdll -DLUA_BUILD_AS_DLL'
  * win32cc: libs+='-llua53' output='path.dll' */
