@@ -24,9 +24,13 @@ static int lua53_rawgetp(lua_State *L, int idx, const void *p)
 # define lua_rawlen          lua_objlen
 # define luaL_newlib(L,libs) luaL_register(L, lua_tostring(L, 1), libs);
 static int lua53_rawgetp(lua_State *L, int idx, const void *p)
-{ lua_pushlightuserdata(L, p); lua_rawget(L, idx); return lua_type(L, -1); }
+{ lua_pushlightuserdata(L, (void*)p); lua_rawget(L, idx); return lua_type(L, -1); }
 static int lua_rawsetp(lua_State *L, int idx, const void *p)
-{ lua_pushlightuserdata(L, p); lua_insert(L, -2); lua_rawset(L, idx); }
+{ lua_pushlightuserdata(L, (void*)p); lua_insert(L, -2); lua_rawset(L, idx); }
+#endif
+
+#ifndef LUAMOD_API
+# define LUAMOD_API LUALIB_API
 #endif
 
 
