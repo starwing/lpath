@@ -1582,14 +1582,14 @@ static int lpL_cmpftime(lua_State *L) {
 
 /* a simple glob implement */
 
-static const char *classend(const char *p) {
+static const char *glob_classend(const char *p) {
     if (*p == '^') ++p;
     while (*++p != '\0' && *p != ']')
         ;
     return *p == ']' ? p+1 : NULL;
 }
 
-static int matchclass(int c, const char *p, const char *ec) {
+static int glob_matchclass(int c, const char *p, const char *ec) {
     int sig = 1;
     if (*(p+1) == '^') { sig = 0; p++; }  /* skip the '^' */
     while (++p < ec) {
@@ -1618,8 +1618,8 @@ static int fnmatch(const char *pattern, const char *s, size_t len) {
                 if (fnmatch(pattern, s_end-i, i)) return 1;
             return 0;
         case '[':
-            if ((ec = classend(pattern + 1)) != NULL) {
-                if (!matchclass(*s, pattern, ec))
+            if ((ec = glob_classend(pattern + 1)) != NULL) {
+                if (!glob_matchclass(*s, pattern, ec))
                     return 0;
                 pattern = ec;
                 ++s;
@@ -1671,7 +1671,7 @@ static int lpL_glob(lua_State *L) {
     lp_try(lp_normpath(L, luaL_optstring(L, 2, "")));
     lua_replace(L, 2);
     if (lua_istable(L, 3))
-        gs.idx = lua_rawlen(L, 3) + 1;
+        gs.idx = (size_t)lua_rawlen(L, 3) + 1;
     else {
         lua_newtable(L);
         lua_replace(L, 3);
@@ -1888,7 +1888,7 @@ static int lpL_libcall(lua_State *L) {
     return (ret = lp_normpath(L, lua_tostring(L, 1))) < 0 ? -ret : ret;
 }
 
-LUALIB_API int luaopen_path(lua_State *L) {
+LUAMOD_API int luaopen_path(lua_State *L) {
     luaL_Reg libs[] = {
 #define ENTRY(n) { #n, lpL_##n },
         LP_PATH_ROUTINES(ENTRY)
@@ -1909,7 +1909,7 @@ LUALIB_API int luaopen_path(lua_State *L) {
     return 1;
 }
 
-LUALIB_API int luaopen_path_fs(lua_State *L) {
+LUAMOD_API int luaopen_path_fs(lua_State *L) {
     luaL_Reg libs[] = {
 #define ENTRY(n) { #n, lpL_##n },
         LP_PATH_FS_ROUTINES(ENTRY)
@@ -1932,7 +1932,7 @@ LUALIB_API int luaopen_path_fs(lua_State *L) {
     return 1;
 }
 
-LUALIB_API int luaopen_path_info(lua_State *L) {
+LUAMOD_API int luaopen_path_info(lua_State *L) {
     struct {
         const char *name;
         const char *value;
