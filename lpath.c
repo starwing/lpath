@@ -72,7 +72,6 @@ typedef int lp_WalkHandler(lp_State *S, void *ud, const char *s, int state);
 #define LP_STATE_KEY    ((void*)(ptrdiff_t)0x9A76B0FF)
 #define LP_DIRDATA      "lpath.Dir Context"
 
-#define lp_try(fc) do { int ret; if ((ret = (fc)) < 0) return ret; } while (0)
 #define lp_returnself(L) do { lua_settop((L), 1); return 1; } while (0)
 
 struct lp_State {
@@ -96,7 +95,9 @@ static int lpL_delstate(lua_State *L) {
 
 static lp_State *lp_getstate(lua_State *L) {
     lp_State *S;
-    if (lua53_rawgetp(L, LUA_REGISTRYINDEX, LP_STATE_KEY) != LUA_TUSERDATA) {
+    if (lua53_rawgetp(L, LUA_REGISTRYINDEX, LP_STATE_KEY) == LUA_TUSERDATA)
+        S = (lp_State*)lua_touserdata(L, -1);
+    else {
         S = (lp_State*)lua_newuserdata(L, sizeof(lp_State));
         memset(S, 0, sizeof(lp_State));
         lua_createtable(L, 0, 1);
@@ -105,10 +106,8 @@ static lp_State *lp_getstate(lua_State *L) {
         lua_setmetatable(L, -2);
         S->ptr = (char*)malloc(LP_BUFFERSIZE);
         S->capacity = LP_BUFFERSIZE;
-        lua_pushvalue(L, -1);
         lua_rawsetp(L, LUA_REGISTRYINDEX, LP_STATE_KEY);
     }
-    S = (lp_State*)lua_touserdata(L, -1);
     lua_pop(L, 1);
     S->L = L;
     S->size = 0;
@@ -465,11 +464,11 @@ static int lp_pusherrmsg(lua_State *L, DWORD err, const char *title, const char 
     const char *msg = lp_win32error(L, err);
     lua_pushnil(L);
     if (title && fn)
-        lua_pushfstring(L, "%s:%s:%d: %s", title, fn, err, msg);
+        lua_pushfstring(L, "%s:%s:(errno=%d): %s", title, fn, err, msg);
     else if (title || fn)
-        lua_pushfstring(L, "%s:%d: %s", title ? title : fn, err, msg);
+        lua_pushfstring(L, "%s:(errno=%d): %s", title ? title : fn, err, msg);
     else
-        lua_pushfstring(L, "lpath:%d: %s", err, msg);
+        lua_pushfstring(L, "lpath:(errno=%d): %s", err, msg);
     return -2;
 }
 
@@ -936,7 +935,8 @@ static int lp_makedirs(lua_State *L, const char *s) {
     lp_State *S = lp_getstate(L);
     WCHAR *ws, *cur, old;
     DWORD err;
-    lp_try(lp_normpath(L, s));
+    int rets;
+    if ((rets = lp_normpath(L, s)) < 0) return rets;
     lp_setbuffer(S, 0);
     ws = lp_addwidepath(S, s = lua_tostring(L, -1));
     cur = ws + (lp_splitdrive(s) - s);
@@ -963,6 +963,18 @@ static int rmdir_walker(lp_State *S, void *ud, const char *s, int state) {
         return lp_pusherror(S->L, "removedirs", s);
     else if (state == LP_WALKOUT && !RemoveDirectoryW(ws))
         return lp_pusherror(S->L, "removedirs", s);
+    return 0;
+}
+
+static int unlock_walker(lp_State *S, void *ud, const char *s, int state) {
+    LPCWSTR ws = lp_addwidechar(S, s);
+    (void)ud;
+    if (state == LP_WALKIN)
+        return 1;
+    if (state == LP_WALKFILE
+            && !SetFileAttributesW(ws,
+                GetFileAttributesW(ws) & ~FILE_ATTRIBUTE_READONLY))
+        return lp_pusherror(S->L, "unlock", s);
     return 0;
 }
 
@@ -1121,11 +1133,11 @@ static int lp_pusherror(lua_State *L, const char *title, const char *fn) {
     (void)lp_prepbuffupdate;
     lua_pushnil(L);
     if (title && fn)
-        lua_pushfstring(L, "%s:%s:%d: %s", title, fn, err, msg);
+        lua_pushfstring(L, "%s:%s:(errno=%d): %s", title, fn, err, msg);
     else if (title || fn)
-        lua_pushfstring(L, "%s:%d: %s", title ? title : fn, err, msg);
+        lua_pushfstring(L, "%s:(errno=%d): %s", title ? title : fn, err, msg);
     else
-        lua_pushfstring(L, "lpath:%d: %s", err, msg);
+        lua_pushfstring(L, "lpath:(errno=%d): %s", err, msg);
     return -2;
 }
 
@@ -1436,7 +1448,8 @@ static int lp_mkdir(lua_State *L, const char *s) {
 static int lp_makedirs(lua_State *L, const char *s) {
     lp_State *S = lp_getstate(L);
     char *dir, *cur, old;
-    lp_try(lp_normpath(L, s));
+    int rets;
+    if ((rets = lp_normpath(L, s)) < 0) return rets;
     lp_setbuffer(S, 0);
     lp_addstring(S, lua_tostring(L, -1));
     lp_addchar(S, '\0');
@@ -1457,13 +1470,25 @@ static int lp_makedirs(lua_State *L, const char *s) {
 }
 
 static int rmdir_walker(lp_State *S, void *ud, const char *s, int state) {
-    (void)S, (void)ud;
+    (void)ud;
     if (state == LP_WALKIN)
         return 1;
     if (state == LP_WALKFILE && remove(s) != 0)
         return lp_pusherror(S->L, "removedirs", s);
     else if (state == LP_WALKOUT && rmdir(s) != 0)
         return lp_pusherror(S->L, "removedirs", s);
+    return 0;
+}
+
+static int unlock_walker(lp_State *S, void *ud, const char *s, int state) {
+    struct stat buf;
+    (void)ud;
+    if (state == LP_WALKIN)
+        return 1;
+    if (state == LP_WALKFILE
+            && stat(s, &buf) != 0
+            && chmod(s, buf.st_mode & ~0200) != 0)
+        return lp_pusherror(S->L, "unlock", s);
     return 0;
 }
 
@@ -1672,7 +1697,8 @@ static int lpL_glob(lua_State *L) {
     lua_Integer l = luaL_optinteger(L, 4, -1);
     int rets;
     lua_settop(L, 3);
-    lp_try(lp_normpath(L, luaL_optstring(L, 2, "")));
+    if ((rets = lp_normpath(L, luaL_optstring(L, 2, ""))) < 0)
+        return -rets;
     lua_replace(L, 2);
     if (lua_istable(L, 3))
         gs.idx = (size_t)lua_rawlen(L, 3) + 1;
@@ -1798,8 +1824,9 @@ static int lp_walk(lua_State *L, const char *s) {
 static int lpL_rel(lua_State *L) {
     const char *fn = luaL_checkstring(L, 1);
     const char *path = luaL_checkstring(L, 2);
-    lp_try(lp_normpath(L, fn));
-    lp_try(lp_normpath(L, path));
+    int rets;
+    if ((rets = lp_normpath(L, fn)) < 0 || (rets = lp_normpath(L, path)) < 0)
+        return -rets;
     return lp_relpath(L, lua_tostring(L, -2), lua_tostring(L, -1));
 }
 
@@ -1811,6 +1838,9 @@ static int lp_join(lua_State *L, const char *s)
 
 static int lp_removedirs(lua_State *L, const char *s)
 { return lp_walkpath(L, s, rmdir_walker, NULL); }
+
+static int lp_unlock(lua_State *L, const char *s)
+{ return lp_walkpath(L, s, unlock_walker, NULL); }
 
 #define LP_PATH_ROUTINES(ENTRY)\
     ENTRY(abs)                 \
@@ -1825,6 +1855,7 @@ static int lp_removedirs(lua_State *L, const char *s)
     ENTRY(expandvars)          \
     ENTRY(fsize)               \
     ENTRY(ftime)               \
+    ENTRY(unlock)              \
     ENTRY(makedirs)            \
     ENTRY(mkdir)               \
     ENTRY(realpath)            \
