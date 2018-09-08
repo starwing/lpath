@@ -11,6 +11,7 @@ LP_NS_BEGIN
 
 #define LUA_LIB
 #include <lua.h>
+#include <time.h>
 #include <lauxlib.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -891,7 +892,7 @@ static int lpL_tmpdir(lua_State* L) {
         return -lp_pusherror(L, "tmpdir", NULL);
     lua_pushstring(L, lp_addmultibyte(S, tmpdir));
     s = lua_tolstring(L, -1, &len);
-    srand((int)(ptrdiff_t)&L);
+    srand(((int)(ptrdiff_t)&L) ^ clock());
     do {
         int magic = ((unsigned)rand()<<16|rand()) % LP_MAX_TMPNUM;
         const char *fmt = lp_isdirsep(s[len-1]) ?
@@ -1425,7 +1426,7 @@ static int lpL_tmpdir(lua_State* L) {
     struct stat buf;
     const char *prefix = luaL_optstring(L, 1, "lua_");
     const char *s = "/tmp/", *dir;
-    srand((int)(ptrdiff_t)&L);
+    srand(((int)(ptrdiff_t)&L) ^ clock() );
     do {
         int magic = ((unsigned)rand()<<16|rand()) % LP_MAX_TMPNUM;
         lua_settop(L, 2);
