@@ -37,7 +37,7 @@ local function maketree(t)
       assert(fs.mkdir(assert(t.name)))
       assert(fs.chdir(assert(t.name)))
    end
-   for k, v in ipairs(t) do
+   for _, v in ipairs(t) do
       if type(v) == "string" then
          assert(fs.touch(v))
       else
@@ -54,7 +54,7 @@ local function collect_tree(t, r, p)
    local prefix = path(t.name, "")
    if p then prefix = path(p, prefix) end
    rt[#rt+1] = prefix
-   for k, v in ipairs(t) do
+   for _, v in ipairs(t) do
       if type(v) == "string" then
          rt[#rt+1] = path(prefix, v)
       else
@@ -94,14 +94,14 @@ test "buffer" {
       local name = (("a"):rep(256).."/"):rep(32)
       local result = (("a"):rep(256).."\\"):rep(32)
       eq(path(name), result)
-      local name = ("a".."/"):rep(256)
+      name = ("a".."/"):rep(256)
       fail("path too complicate", assert, path(name))
    end;
 
    posix = function()
       local name = (("a"):rep(256).."/"):rep(32)
       eq(path(name), name)
-      local name = ("a".."/"):rep(256)
+      name = ("a".."/"):rep(256)
       fail("path too complicate", assert, path(name))
    end;
 }
@@ -231,58 +231,58 @@ test "split" {
    windows = function()
       local a, b = path.split ""
       eq(a, ""); eq(b, "")
-      local a, b = path.split "a/b"
+      a, b = path.split "a/b"
       eq(a, "a/"); eq(b, "b")
-      local a, b = path.split "aaa/bbb"
+      a, b = path.split "aaa/bbb"
       eq(a, "aaa/"); eq(b, "bbb")
-      local a, b = path.split "/"
+      a, b = path.split "/"
       eq(a, "/"); eq(b, "")
-      local a, b = path.split "/a"
+      a, b = path.split "/a"
       eq(a, "/"); eq(b, "a")
-      local a, b = path.split "a"
+      a, b = path.split "a"
       eq(a, ""); eq(b, "a")
-      local a, b = path.split "aaa"
+      a, b = path.split "aaa"
       eq(a, ""); eq(b, "aaa")
-      local a, b = path.split "a/"
+      a, b = path.split "a/"
       eq(a, "a/"); eq(b, "")
-      local a, b = path.split "//a/b/c"
+      a, b = path.split "//a/b/c"
       eq(a, "//a/b/"); eq(b, "c")
-      local a, b = path.split "//a/b/"
+      a, b = path.split "//a/b/"
       eq(a, "//a/b/"); eq(b, "")
-      local a, b = path.split "c:"
+      a, b = path.split "c:"
       eq(a, "c:"); eq(b, "")
-      local a, b = path.split "c:/"
+      a, b = path.split "c:/"
       eq(a, "c:/"); eq(b, "")
-      local a, b = path.split "c:/a"
+      a, b = path.split "c:/a"
       eq(a, "c:/"); eq(b, "a")
    end;
 
    posix = function()
       local a, b = path.split ""
       eq(a, ""); eq(b, "")
-      local a, b = path.split "a/b"
+      a, b = path.split "a/b"
       eq(a, "a/"); eq(b, "b")
-      local a, b = path.split "aaa/bbb"
+      a, b = path.split "aaa/bbb"
       eq(a, "aaa/"); eq(b, "bbb")
-      local a, b = path.split "/"
+      a, b = path.split "/"
       eq(a, "/"); eq(b, "")
-      local a, b = path.split "/a"
+      a, b = path.split "/a"
       eq(a, "/"); eq(b, "a")
-      local a, b = path.split "a"
+      a, b = path.split "a"
       eq(a, ""); eq(b, "a")
-      local a, b = path.split "aaa"
+      a, b = path.split "aaa"
       eq(a, ""); eq(b, "aaa")
-      local a, b = path.split "a/"
+      a, b = path.split "a/"
       eq(a, "a/"); eq(b, "")
-      local a, b = path.split "//a/b/c"
+      a, b = path.split "//a/b/c"
       eq(a, "//a/b/"); eq(b, "c")
-      local a, b = path.split "//a/b/"
+      a, b = path.split "//a/b/"
       eq(a, "//a/b/"); eq(b, "")
-      local a, b = path.split "c:"
+      a, b = path.split "c:"
       eq(a, ""); eq(b, "c:")
-      local a, b = path.split "c:/"
+      a, b = path.split "c:/"
       eq(a, "c:/"); eq(b, "")
-      local a, b = path.split "c:/a"
+      a, b = path.split "c:/a"
       eq(a, "c:/"); eq(b, "a")
    end;
 }
@@ -291,66 +291,66 @@ test "splitdrive" {
    windows = function()
       local a, b = path.splitdrive "a/b"
       eq(a, ""); eq(b, "a/b")
-      local a, b = path.splitdrive "c:a/b"
+      a, b = path.splitdrive "c:a/b"
       eq(a, "c:"); eq(b, "a/b")
-      local a, b = path.splitdrive "c:/a/b"
+      a, b = path.splitdrive "c:/a/b"
       eq(a, "c:"); eq(b, "/a/b")
-      local a, b = path.splitdrive "cd:/a/b"
+      a, b = path.splitdrive "cd:/a/b"
       eq(a, ""); eq(b, "cd:/a/b")
-      local a, b = path.splitdrive "//a/"
+      a, b = path.splitdrive "//a/"
       eq(a, ""); eq(b, "//a/")
-      local a, b = path.splitdrive "//a/b"
+      a, b = path.splitdrive "//a/b"
       eq(a, "//a/b"); eq(b, "")
-      local a, b = path.splitdrive "//a/b/a/b"
+      a, b = path.splitdrive "//a/b/a/b"
       eq(a, "//a/b"); eq(b, "/a/b")
-      local a, b = path.splitdrive "//?/a"
+      a, b = path.splitdrive "//?/a"
       eq(a, "//?/"); eq(b, "a")
-      local a, b = path.splitdrive "//?//a"
+      a, b = path.splitdrive "//?//a"
       eq(a, "//?/"); eq(b, "/a")
-      local a, b = path.splitdrive "//?///a/"
+      a, b = path.splitdrive "//?///a/"
       eq(a, "//?/"); eq(b, "//a/")
-      local a, b = path.splitdrive "//?///a/b"
+      a, b = path.splitdrive "//?///a/b"
       eq(a, "//?///a/b"); eq(b, "")
-      local a, b = path.splitdrive "//?///a/b/"
+      a, b = path.splitdrive "//?///a/b/"
       eq(a, "//?///a/b"); eq(b, "/")
-      local a, b = path.splitdrive "//?/c:"
+      a, b = path.splitdrive "//?/c:"
       eq(a, "//?/c:"); eq(b, "")
-      local a, b = path.splitdrive "//?/c:/"
+      a, b = path.splitdrive "//?/c:/"
       eq(a, "//?/c:"); eq(b, "/")
-      local a, b = path.splitdrive "//?/cd:/"
+      a, b = path.splitdrive "//?/cd:/"
       eq(a, "//?/"); eq(b, "cd:/")
    end;
 
    posix = function()
       local a, b = path.splitdrive "a/b"
       eq(a, ""); eq(b, "a/b")
-      local a, b = path.splitdrive "c:a/b"
+      a, b = path.splitdrive "c:a/b"
       eq(a, ""); eq(b, "c:a/b")
-      local a, b = path.splitdrive "c:/a/b"
+      a, b = path.splitdrive "c:/a/b"
       eq(a, ""); eq(b, "c:/a/b")
-      local a, b = path.splitdrive "cd:/a/b"
+      a, b = path.splitdrive "cd:/a/b"
       eq(a, ""); eq(b, "cd:/a/b")
-      local a, b = path.splitdrive "//a/"
+      a, b = path.splitdrive "//a/"
       eq(a, ""); eq(b, "//a/")
-      local a, b = path.splitdrive "//a/b"
+      a, b = path.splitdrive "//a/b"
       eq(a, ""); eq(b, "//a/b")
-      local a, b = path.splitdrive "//a/b/a/b"
+      a, b = path.splitdrive "//a/b/a/b"
       eq(a, ""); eq(b, "//a/b/a/b")
-      local a, b = path.splitdrive "//?/a"
+      a, b = path.splitdrive "//?/a"
       eq(a, ""); eq(b, "//?/a")
-      local a, b = path.splitdrive "//?//a"
+      a, b = path.splitdrive "//?//a"
       eq(a, ""); eq(b, "//?//a")
-      local a, b = path.splitdrive "//?///a/"
+      a, b = path.splitdrive "//?///a/"
       eq(a, ""); eq(b, "//?///a/")
-      local a, b = path.splitdrive "//?///a/b"
+      a, b = path.splitdrive "//?///a/b"
       eq(a, ""); eq(b, "//?///a/b")
-      local a, b = path.splitdrive "//?///a/b/"
+      a, b = path.splitdrive "//?///a/b/"
       eq(a, ""); eq(b, "//?///a/b/")
-      local a, b = path.splitdrive "//?/c:"
+      a, b = path.splitdrive "//?/c:"
       eq(a, ""); eq(b, "//?/c:")
-      local a, b = path.splitdrive "//?/c:/"
+      a, b = path.splitdrive "//?/c:/"
       eq(a, ""); eq(b, "//?/c:/")
-      local a, b = path.splitdrive "//?/cd:/"
+      a, b = path.splitdrive "//?/cd:/"
       eq(a, ""); eq(b, "//?/cd:/")
    end;
 }
@@ -381,28 +381,41 @@ test "itercomp" {
    windows = function()
       local function collect(s)
          local t = {}
-         for i, v in path.itercomp(s) do
+         for _, v in path.itercomp(s) do
             t[#t+1] = v
          end
          return t
       end
+      table_eq(collect "a/b/c/d",
+               {"a", "b", "c", "d"})
+      table_eq(collect "a/b/c/d",
+               {"a", "b", "c", "d"})
       table_eq(collect "aa/bb/cc/dd",
                {"aa", "bb", "cc", "dd"})
       table_eq(collect "/aa/bb/cc/dd",
                {"\\", "aa", "bb", "cc", "dd"})
+      table_eq(collect "/a/b/c/d",
+               {"\\", "a", "b", "c", "d"})
       table_eq(collect "c:/aa/bb/cc/dd",
                {"C:", "\\", "aa", "bb", "cc", "dd"})
+      table_eq(collect "c:/a/b/c/d",
+               {"C:", "\\", "a", "b", "c", "d"})
       table_eq(collect "c:aa/bb/cc/dd",
                {"C:", "aa", "bb", "cc", "dd"})
+      table_eq(collect "c:a/b/c/d",
+               {"C:", "a", "b", "c", "d"})
       table_eq(collect "//aa/bb/aa/bb/cc/dd",
                {[[\\AA\BB]],
                "\\", "aa", "bb", "cc", "dd"})
+      table_eq(collect "//a/b/a/b/c/d",
+               {[[\\A\B]],
+               "\\", "a", "b", "c", "d"})
    end;
 
    posix = function()
       local function collect(s)
          local t = {}
-         for i, v in path.itercomp(s) do
+         for _, v in path.itercomp(s) do
             t[#t+1] = v
          end
          return t
@@ -420,22 +433,22 @@ test "itercomp" {
    end;
 }
 
-function test_splitext()
+function _G.test_splitext()
    local a, b = path.splitext "a/b"
    eq(a, "a/b"); eq(b, "")
-   local a, b = path.splitext "a/b.c"
+   a, b = path.splitext "a/b.c"
    eq(a, "a/b"); eq(b, ".c")
-   local a, b = path.splitext "a/b.c.d"
+   a, b = path.splitext "a/b.c.d"
    eq(a, "a/b.c"); eq(b, ".d")
-   local a, b = path.splitext "a.b/c"
+   a, b = path.splitext "a.b/c"
    eq(a, "a.b/c"); eq(b, "")
-   local a, b = path.splitext "a.b/.c"
+   a, b = path.splitext "a.b/.c"
    eq(a, "a.b/"); eq(b, ".c")
-   local a, b = path.splitext "a.b/.c.d"
+   a, b = path.splitext "a.b/.c.d"
    eq(a, "a.b/.c"); eq(b, ".d")
 end
 
-function test_dir()
+function _G.test_dir()
    local cwd = fs.getcwd()
    local dir = assert(fs.tmpdir())
    assert(fs.chdir(dir))
@@ -461,7 +474,7 @@ function test_dir()
             files[fn] = true
          end
       end
-      for k, v in ipairs(d) do
+      for _, v in ipairs(d) do
          if type(v) == "string" then
             assert(files[v], v)
             files[v] = nil
@@ -479,7 +492,7 @@ function test_dir()
    fs.chdir(cwd)
 end
 
-function test_makedirs()
+function _G.test_makedirs()
    local cwd = fs.getcwd()
    local dir = assert(fs.tmpdir())
    assert(fs.chdir(dir))
@@ -508,15 +521,15 @@ function test_makedirs()
    fs.chdir(cwd)
 end
 
-function test_fnmatch()
+function _G.test_fnmatch()
    is_true(fs.fnmatch("abc", "a[b]c"))
    is_true(fs.fnmatch("abc", "*a*b*c*"))
    is_true(not fs.fnmatch("abc", "a[^b]c"))
 end
 
-function test_walk()
+function _G.test_walk()
    local cwd = fs.getcwd()
-   local dir = assert(fs.tmpdir())
+   assert(fs.tmpdir())
    assert(fs.removedirs "test")
    maketree(dir_table)
    local map = {}
@@ -525,15 +538,15 @@ function test_walk()
       map[v] = true
    end
    map['test'..info.sep] = nil
-   for path, state in fs.walk "test" do
+   for p, state in fs.walk "test" do
       if state == 'out' then
-         assert(inlist[path])
-         inlist[path] = nil
+         assert(inlist[p])
+         inlist[p] = nil
       else
-         eq(map[path], true)
-         map[path] = nil
+         eq(map[p], true)
+         map[p] = nil
          if state == 'in' then
-            inlist[path] = true
+            inlist[p] = true
          end
       end
    end
@@ -547,4 +560,5 @@ function test_walk()
 end
 
 os.exit(unit.LuaUnit.run(), true)
+-- cc: run+=' & gcov lpath.c'
 

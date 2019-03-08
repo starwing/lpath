@@ -142,8 +142,7 @@ static char *lp_prepare(lp_State *S, size_t sz) {
 
 static char *lp_prepbuffsize(lp_State *S, size_t sz) {
     char *ptr = lp_prepare(S, sz);
-    if (ptr == NULL)
-        luaL_error(S->L, "path buffer out of memory");
+    if (ptr == NULL) luaL_error(S->L, "path buffer out of memory");
     return ptr;
 }
 
@@ -1727,8 +1726,8 @@ static int lpL_fnmatch(lua_State *L) {
 /* dir utils */
 
 static int lpL_compiter(lua_State *L) {
-    int idx = (int)lua_tointeger(L, 2);
-    const char *d = lua_tostring(L, 1);
+    size_t len, idx = (size_t)lua_tointeger(L, 2);
+    const char *d = lua_tolstring(L, 1, &len);
     const char *p = lp_splitdrive(d), *next;
     int isabs = lp_isdirsep(*p);
     if (idx == 0) {
@@ -1737,21 +1736,19 @@ static int lpL_compiter(lua_State *L) {
         lua_pushinteger(L, 1);
         lua_pushlstring(L, d, p == d ? 1 : p-d);
         return 2;
-    }
-    if (idx == 1 && d != p && isabs) {
+    } else if (idx == 1 && d != p && isabs) {
         lua_pushinteger(L, p-d + 1);
         lua_pushstring(L, LP_DIRSEP);
         return 2;
+    } else if (idx <= len && ((next = d + (idx-1)) < p
+                || lp_isdirsep(*next)
+                || *(next = lp_nextsep(next)) != '\0')) {
+        next = next < p ? p : next + 1;
+        lua_pushinteger(L, next - d + 1);
+        lua_pushlstring(L, next, idx = lp_nextsep(next) - next);
+        return idx == 0 ? 0 : 2;
     }
-    next = d + idx - 1;
-    if (next < p)
-        next = p - 1;
-    else if (!lp_isdirsep(*next) && *(next = lp_nextsep(next)) == '\0')
-        return 0;
-    ++next;
-    lua_pushinteger(L, next - d + 1);
-    lua_pushlstring(L, next, idx = lp_nextsep(next) - next);
-    return idx == 0 ? 0 : 2;
+    return 0;
 }
 
 static int lp_itercomp(lua_State *L, const char *s) {
