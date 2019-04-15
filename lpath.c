@@ -132,8 +132,10 @@ static char *lp_prepare(lp_State *S, size_t sz) {
         size_t newsize = LP_BUFFERSIZE;
         while (newsize < expect && newsize < LP_MAX_SIZET)
             newsize += newsize >> 1;
-        if (newsize < expect || (ptr = (char*)realloc(S->ptr, newsize)) == NULL)
+        if (newsize < expect || (ptr = (char*)realloc(S->ptr, newsize)) == NULL) {
+            luaL_error(S->L, "lpath: out of memory");
             return NULL;
+        }
         S->ptr = ptr;
         S->capacity = newsize;
     }
@@ -802,13 +804,18 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
     int ret = 0, top = 0;
     size_t pos[LP_MAX_COMPCOUNT];
     HANDLE hFile[LP_MAX_COMPCOUNT];
+    WCHAR *path;
     if (*s != '\0' && attr == INVALID_FILE_ATTRIBUTES)
         return 0;
     if (*s != '\0' && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0)
         return h(S, ud, s, LP_WALKFILE);
     wfd.cFileName[0] = 0;
     wfd.dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
-    pos[0] = lp_bufflen(S) - sizeof(WCHAR);
+    if ((lp_bufflen(S) -= sizeof(WCHAR)) > 0) {
+        path = (WCHAR*)lp_buffer(S) + lp_bufflen(S)/sizeof(WCHAR);
+        while (--path, lp_isdirsep(*path)) lp_bufflen(S) -= sizeof(WCHAR);
+    }
+    pos[0] = lp_bufflen(S);
     do {
         size_t len = wcslen(wfd.cFileName)*sizeof(WCHAR);
         lp_setbuffer(S, pos[top]);
@@ -1207,7 +1214,7 @@ static int lp_expandvars(lua_State *L, const char *s) {
         return 2;
     }
     luaL_checkstack(L, p.we_wordc, "too many results");
-    for (i = 0; i < p.we_wordc; ++i)
+    for (i = 0; i < (int)p.we_wordc; ++i)
         lua_pushstring(L, p.we_wordv[i]);
     wordfree(&p);
     return i;
@@ -1353,13 +1360,15 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
     struct stat buf;
     struct dirent *data = NULL;
     int top = 0, ret = stat(s, &buf), isdir = 1;
-    size_t pos[LP_MAX_COMPCOUNT];
+    size_t pos[LP_MAX_COMPCOUNT], len;
     DIR *dir[LP_MAX_COMPCOUNT];
     if (*s != '\0' && ret != 0)
         return 0;
     if (*s != '\0' && !S_ISDIR(buf.st_mode))
         return h(S, ud, s, LP_WALKFILE);
-    lp_addstring(S, s), pos[top] = strlen(s);
+    len = strlen(s);
+    while (lp_isdirsep(s[len-1])) --len;
+    lp_addlstring(S, s, len), pos[top] = len;
     do {
         if (top) {
             lp_setbuffer(S, pos[top]);
@@ -1995,6 +2004,7 @@ LP_NS_END
 
 /* cc: flags+='-Wextra --coverage' run='lua test.lua'
  * unixcc: flags+='-s -O3 -shared -fPIC' output='path.so'
+ * maccc: flags+='-s -O3 -shared -undefined dynamic_lookup' output='path.so'
  * win32cc: flags+='-s -O3 -mdll -DLUA_BUILD_AS_DLL'
  * win32cc: libs+='-llua53' output='path.dll' */
 
