@@ -5,3 +5,8 @@ tags*
 *.obj
 *.so
 *.o
+
+*.gcno
+*.gcda
+*.gcov
+
