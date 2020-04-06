@@ -524,7 +524,7 @@ end
 function _G.test_fnmatch()
    is_true(fs.fnmatch("abc", "a[b]c"))
    is_true(fs.fnmatch("abc", "*a*b*c*"))
-   is_true(not fs.fnmatch("abc", "a[^b]c"))
+   is_true(not fs.fnmatch("abc", "a[!b]c"))
 end
 
 function _G.test_walk()
@@ -553,6 +553,13 @@ function _G.test_walk()
    eq(next(map), nil)
    eq(next(inlist), nil)
    collectgarbage "collect"
+   for _, f in ipairs(fs.glob("*f[i]le*", "test")) do
+      print(f)
+   end
+   print "====="
+   for _, f in ipairs(fs.glob("*", "test")) do
+      print(f)
+   end
    eq(#assert(fs.glob("*f[i]le*", "test")), 9)
    assert(fs.removedirs "test")
    assert(not fs.exists "test")
@@ -560,5 +567,4 @@ function _G.test_walk()
 end
 
 os.exit(unit.LuaUnit.run(), true)
--- cc: run+=' & gcov lpath.c'
 

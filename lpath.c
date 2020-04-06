@@ -1620,62 +1620,38 @@ static int lpL_cmpftime(lua_State *L) {
 
 /* a simple glob implement */
 
-static const char *glob_classend(const char *p) {
-    if (*p == '^') ++p;
-    while (*++p != '\0' && *p != ']')
+static int lp_fnmatch(const char *s, const char *e, const char *ps, const char *pe);
+
+static int lp_matchclass(const char *s, const char *e, const char *ps, const char *pe) {
+    const char *end;
+    int inv = 0, res = 0;
+    for (end = ps; end < pe && *end != ']'; ++end)
         ;
-    return *p == ']' ? p+1 : NULL;
+    if (end == pe) return *s == '[' && lp_fnmatch(s+1, e, ps, pe);
+    if (*ps == '!') inv = 1, ++ps;
+    if (*ps == ']') res = (*s == ']'), ++ps;
+    for (; !res && ps < end; ++ps) {
+        int range = ps[1] == '-' && ps[2] != ']';
+        res = range ? *ps <= *s && *s <= ps[2] : *s == *ps;
+        if (range) ps += 2;
+    }
+    return res != inv && lp_fnmatch(s+1, e, end+1, pe);
 }
 
-static int glob_matchclass(int c, const char *p, const char *ec) {
-    int sig = 1;
-    if (*(p+1) == '^') { sig = 0; p++; }  /* skip the '^' */
-    while (++p < ec) {
-        int b = *p, e = p[1] != '-' && p+2<ec ? *p : *(p += 2);
-        if (b <= c && c <= e)
-            return sig;
+static int lp_fnmatch(const char *s, const char *e, const char *ps, const char *pe) {
+    if (ps >= pe) return s >= e;
+    switch (*ps) {
+    case '*': return pe==ps+1 || lp_fnmatch(s, e, ps+1, pe)
+              || (s < e && lp_fnmatch(s+1, e, ps, pe));
+    case '?': return s < e && lp_fnmatch(s+1, e, ps+1, pe);
+    case '[': return s < e && lp_matchclass(s, e, ps+1, pe);
+    default:  return s < e && *s == *ps && lp_fnmatch(s+1, e, ps+1, pe);
     }
-    return !sig;
-}
-
-static int fnmatch(const char *pattern, const char *s, size_t len) {
-    const char *s_end = s+len;
-    while (*pattern != '\0') {
-        const char *ec;
-        int i, min = 0, hasmax = 0;
-        switch (*pattern) {
-        case '*': case '?':
-            while (*pattern == '*' || *pattern == '?')
-                if (*pattern++ == '?') ++min;
-                else                   hasmax = 1;
-            if (s_end - s < min)  return 0;
-            if (!hasmax) s += min;
-            else if (*pattern == '\0') return 1;
-            len = (s_end-s) - min;
-            for (i = 0; i <= (int)len; ++i)
-                if (fnmatch(pattern, s_end-i, i)) return 1;
-            return 0;
-        case '[':
-            if ((ec = glob_classend(pattern + 1)) != NULL) {
-                if (!glob_matchclass(*s, pattern, ec))
-                    return 0;
-                pattern = ec;
-                ++s;
-                break;
-            }
-            /* FALLTHOUGH */
-        default:
-            if (!lp_charequal(*pattern, *s))
-                return 0;
-            ++pattern, ++s;
-        }
-    }
-    return s == s_end;
 }
 
 typedef struct GlobState {
     lua_State  *L;
-    const char *pattern;
+    const char *patt, *pe;
     size_t      idx;
     size_t      limit;
 } GlobState;
@@ -1693,7 +1669,7 @@ static int glob_walker(lp_State *S, void *ud, const char *s, int state) {
     }
     else if (state == LP_WALKOUT)
         ++gs->limit;
-    if (state != LP_WALKOUT && fnmatch(gs->pattern, s, strlen(s))) {
+    if (state != LP_WALKOUT && lp_fnmatch(s, s+strlen(s), gs->patt, gs->pe)) {
         lua_pushstring(gs->L, s);
         lua_rawseti(gs->L, 3, gs->idx++);
     }
@@ -1702,7 +1678,8 @@ static int glob_walker(lp_State *S, void *ud, const char *s, int state) {
 
 static int lpL_glob(lua_State *L) {
     GlobState gs;
-    const char *p = luaL_checkstring(L, 1);
+    size_t plen;
+    const char *p = luaL_checklstring(L, 1, &plen);
     lua_Integer l = luaL_optinteger(L, 4, -1);
     int rets;
     lua_settop(L, 3);
@@ -1716,18 +1693,18 @@ static int lpL_glob(lua_State *L) {
         lua_replace(L, 3);
         gs.idx = 1;
     }
-    gs.L = L;
-    gs.pattern = p;
-    gs.limit   = (int)l;
+    gs.L     = L;
+    gs.patt  = p, gs.pe = p+plen;
+    gs.limit = (int)l;
     rets = lp_walkpath(L, lua_tostring(L, 2), glob_walker, &gs);
     return rets > 0 ? 1 : -rets;
 }
 
 static int lpL_fnmatch(lua_State *L) {
-    size_t len;
+    size_t len, plen;
     const char *s = luaL_checklstring(L, 1, &len);
-    const char *pattern = luaL_checkstring(L, 2);
-    lua_pushboolean(L, fnmatch(pattern, s, len));
+    const char *p = luaL_checklstring(L, 2, &plen);
+    lua_pushboolean(L, lp_fnmatch(s, s+len, p, p+plen));
     return 1;
 }
 
