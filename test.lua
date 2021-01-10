@@ -135,6 +135,7 @@ test "normpath" {
       eq(path("a/../b"), [[b]])
       eq(path("a/../../b"), [[../b]])
       eq(path("/a/../../b"), [[/b]])
+      eq(path("/a/../../../../../../../../../..//b"), [[/b]])
       eq(path("a/b"), [[a/b]])
       eq(path(".."), [[../]])
       eq(path("../.."), [[../../]])
@@ -553,13 +554,13 @@ function _G.test_walk()
    eq(next(map), nil)
    eq(next(inlist), nil)
    collectgarbage "collect"
-   for _, f in ipairs(fs.glob("*f[i]le*", "test")) do
-      print(f)
-   end
-   print "====="
-   for _, f in ipairs(fs.glob("*", "test")) do
-      print(f)
-   end
+   -- for _, f in ipairs(fs.glob("*f[i]le*", "test")) do
+   --    print(f)
+   -- end
+   -- print "====="
+   -- for _, f in ipairs(fs.glob("*", "test")) do
+   --    print(f)
+   -- end
    eq(#assert(fs.glob("*f[i]le*", "test")), 9)
    assert(fs.removedirs "test")
    assert(not fs.exists "test")

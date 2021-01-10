@@ -215,8 +215,7 @@ retry:
          * (after the initial two) */
         if (*(mp = lp_nextsep(s + 2)) != '\0' && !lp_isdirend(mp[1]))
             split = lp_nextsep(mp + 1);
-    }
-    else if (s[1] == ':')
+    } else if (s[1] == ':')
         split = s + 2;
     return split;
 #else
@@ -226,7 +225,6 @@ retry:
 
 static const char *lp_splitpath(const char *s) {
     const char *p;
-    s = lp_splitdrive(s);
     if (*s == '\0')
         return s;
     p = s + strlen(s) - 1;
@@ -296,17 +294,14 @@ static int lp_normpath(lua_State *L, const char *s) {
                 lp_addlstring(S, LP_PARDIR, LP_PARDIRLEN);
                 lp_addchar(S, LP_DIRSEPCHAR);
             }
-        }
-        else if (*(e = lp_nextsep(s)) == '\0') {
+        } else if (*(e = lp_nextsep(s)) == '\0') {
             lp_addstring(S, s);
             break;
-        }
-        else if (top >= LP_MAX_COMPCOUNT) {
+        } else if (top >= LP_MAX_COMPCOUNT) {
             lua_pushnil(S->L);
             lua_pushstring(S->L, "path too complicate");
             return -2;
-        }
-        else {
+        } else {
             pos[top++] = lp_bufflen(S);
             lp_addlstring(S, s, e-s);
             lp_addchar(S, LP_DIRSEPCHAR);
@@ -823,8 +818,7 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
         if ((wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
             ret = h(S, ud, lp_addmultibyte(S, NULL), LP_WALKFILE);
             if (ret < 0) break;
-        }
-        else if (top < LP_MAX_COMPCOUNT-1
+        } else if (top < LP_MAX_COMPCOUNT-1
                     && wcscmp(wfd.cFileName, L".")
                     && wcscmp(wfd.cFileName, L".."))
         {
@@ -1378,8 +1372,7 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
             *lp_prepbuffsize(S, 1) = 0;
             ret = h(S, ud, lp_buffer(S), LP_WALKFILE);
             if (ret < 0) goto out;
-        }
-        else if (top < LP_MAX_COMPCOUNT-1) {
+        } else if (top < LP_MAX_COMPCOUNT-1) {
             size_t len = lp_bufflen(S) + 1;
             lp_addlstring(S, "/", 2);
             ret = h(S, ud, lp_buffer(S), LP_WALKIN);
@@ -1620,38 +1613,67 @@ static int lpL_cmpftime(lua_State *L) {
 
 /* a simple glob implement */
 
-static int lp_fnmatch(const char *s, const char *e, const char *ps, const char *pe);
+typedef struct lp_Slice {
+    const char *s, *e;
+} lp_Slice;
 
-static int lp_matchclass(const char *s, const char *e, const char *ps, const char *pe) {
-    const char *end;
+static int lp_fnmatch(lp_Slice s, lp_Slice p);
+
+static int lp_matchone(int ch, lp_Slice *p) {
+    const char *ps = p->s;
     int inv = 0, res = 0;
-    for (end = ps; end < pe && *end != ']'; ++end)
-        ;
-    if (end == pe) return *s == '[' && lp_fnmatch(s+1, e, ps, pe);
-    if (*ps == '!') inv = 1, ++ps;
-    if (*ps == ']') res = (*s == ']'), ++ps;
-    for (; !res && ps < end; ++ps) {
-        int range = ps[1] == '-' && ps[2] != ']';
-        res = range ? *ps <= *s && *s <= ps[2] : *s == *ps;
-        if (range) ps += 2;
+    if (*p->s == '?' || (*p->s != '[' && *p->s == ch))
+        return (++p->s, 1);
+    if (*p->s != '[') return 0;
+    if (*++p->s == '!') inv = 1, ++p->s;
+    if (*p->s == ']') res = (ch == ']'), ++p->s;
+    for (; !res && p->s < p->e && *p->s != ']'; ++p->s) {
+        int range = p->s+1 < p->e && p->s[1] == '-'
+                 && p->s+2 < p->e && p->s[2] != ']';
+        res = range ? *p->s <= ch && ch <= p->s[2] : ch == *p->s;
+        if (range) p->s += 2;
     }
-    return res != inv && lp_fnmatch(s+1, e, end+1, pe);
+    while (p->s < p->e && *p->s != ']')
+        ++p->s;
+    if (p->s == p->e) {
+        p->s = ps;
+        res = (ch == '['), inv = 0;
+    }
+    return res != inv ? (++p->s, 1) : (p->s = ps, 0);
 }
 
-static int lp_fnmatch(const char *s, const char *e, const char *ps, const char *pe) {
-    if (ps >= pe) return s >= e;
-    switch (*ps) {
-    case '*': return pe==ps+1 || lp_fnmatch(s, e, ps+1, pe)
-              || (s < e && lp_fnmatch(s+1, e, ps, pe));
-    case '?': return s < e && lp_fnmatch(s+1, e, ps+1, pe);
-    case '[': return s < e && lp_matchclass(s, e, ps+1, pe);
-    default:  return s < e && *s == *ps && lp_fnmatch(s+1, e, ps+1, pe);
+static int lp_fnmatch(lp_Slice s, lp_Slice p) {
+    const char *start = NULL, *match;
+    if (p.s >= p.e) return s.s >= s.e;
+    while (s.s < s.e) {
+        if (p.s < p.e && lp_matchone(*s.s, &p))
+            ++s.s;
+        else if (p.s < p.e && *p.s == '*')
+            match = s.s, start = ++p.s;
+        else if (start != NULL)
+            s.s = ++match, p.s = start;
+        else return 0;
     }
+    while (p.s < p.e && *p.s == '*') ++p.s;
+    return p.s == p.e;
+}
+
+static int lp_makecomps(const char *s, lp_Slice parts[LP_MAX_COMPCOUNT]) {
+    int i;
+    for (i = 0; *s != '\0' && i < LP_MAX_COMPCOUNT; ++i) {
+        while (lp_isdirsep(*s)) ++s;
+        parts[i].s = s;
+        while (*s != '\0' && !lp_isdirsep(*s)) ++s;
+        parts[i].e = s;
+    }
+    return i;
 }
 
 typedef struct GlobState {
     lua_State  *L;
-    const char *patt, *pe;
+    const char *patt;
+    lp_Slice    pparts[LP_MAX_COMPCOUNT];
+    int         pnparts;
     size_t      idx;
     size_t      limit;
 } GlobState;
@@ -1666,10 +1688,20 @@ static int glob_walker(lp_State *S, void *ud, const char *s, int state) {
     if (state == LP_WALKIN) {
         if (gs->limit == 0) return 0;
         --gs->limit;
-    }
-    else if (state == LP_WALKOUT)
+    } else if (state == LP_WALKOUT)
         ++gs->limit;
-    if (state != LP_WALKOUT && lp_fnmatch(s, s+strlen(s), gs->patt, gs->pe)) {
+    if (state != LP_WALKOUT) {
+        lp_Slice sparts[LP_MAX_COMPCOUNT];
+        int i, j, snparts;
+        s = lp_splitdrive(lp_drivehead(s));
+        snparts = lp_makecomps(s, sparts);
+        if (lp_isdirsep(*gs->patt) && snparts != gs->pnparts)
+            return 1;
+        if (snparts < gs->pnparts)
+            return 1;
+        for (i = snparts, j = gs->pnparts; j > 0; --i, --j)
+            if (!lp_fnmatch(sparts[i-1], gs->pparts[j-1]))
+                return 1;
         lua_pushstring(gs->L, s);
         lua_rawseti(gs->L, 3, gs->idx++);
     }
@@ -1679,7 +1711,7 @@ static int glob_walker(lp_State *S, void *ud, const char *s, int state) {
 static int lpL_glob(lua_State *L) {
     GlobState gs;
     size_t plen;
-    const char *p = luaL_checklstring(L, 1, &plen);
+    const char *ts, *s, *p = luaL_checklstring(L, 1, &plen);
     lua_Integer l = luaL_optinteger(L, 4, -1);
     int rets;
     lua_settop(L, 3);
@@ -1693,18 +1725,34 @@ static int lpL_glob(lua_State *L) {
         lua_replace(L, 3);
         gs.idx = 1;
     }
+    ts = s = lua_tostring(L, 2);
+    if (!lp_driveequal(&ts, &p) || *p == '\0')
+        return 1;
     gs.L     = L;
-    gs.patt  = p, gs.pe = p+plen;
+    gs.patt  = p;
+    gs.pnparts = lp_makecomps(p, gs.pparts);
     gs.limit = (int)l;
-    rets = lp_walkpath(L, lua_tostring(L, 2), glob_walker, &gs);
+    rets = lp_walkpath(L, s, glob_walker, &gs);
     return rets > 0 ? 1 : -rets;
 }
 
 static int lpL_fnmatch(lua_State *L) {
-    size_t len, plen;
-    const char *s = luaL_checklstring(L, 1, &len);
-    const char *p = luaL_checklstring(L, 2, &plen);
-    lua_pushboolean(L, lp_fnmatch(s, s+len, p, p+plen));
+    const char *s = luaL_checkstring(L, 1);
+    const char *p = luaL_checkstring(L, 2);
+    lp_Slice sparts[LP_MAX_COMPCOUNT], pparts[LP_MAX_COMPCOUNT];
+    int i, j, snparts, pnparts;
+    if (!lp_driveequal(&s, &p) || *p == '\0')
+        return 0;
+    snparts = lp_makecomps(s, sparts);
+    pnparts = lp_makecomps(p, pparts);
+    if (lp_isdirsep(*p) && snparts != pnparts)
+        return 0;
+    if (snparts > pnparts)
+        return 0;
+    for (i = snparts, j = pnparts; j > 0; --i, --j)
+        if (!lp_fnmatch(sparts[i-1], pparts[j-1]))
+            return 0;
+    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -1854,8 +1902,7 @@ static const char *lp_checkpathargs(lua_State *L) {
     if (top == 0) {
         lua_pushstring(L, "." LP_DIRSEP);
         return "." LP_DIRSEP;
-    }
-    else if (top == 1)
+    } else if (top == 1)
         return luaL_checkstring(L, 1);
     lpL_joinpath(L);
     return lua_tostring(L, 1);
@@ -1873,7 +1920,7 @@ LP_PATH_FS_ROUTINES(ENTRY)
 
 static int lpL_split(lua_State *L) {
     const char *s = lp_checkpathargs(L);
-    const char *b = lp_splitpath(s);
+    const char *b = lp_splitpath(lp_splitdrive(s));
     lua_pushlstring(L, s, b-s);
     lua_pushstring(L, b);
     return 2;
