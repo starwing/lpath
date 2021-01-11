@@ -34,10 +34,66 @@ static int lua_rawsetp(lua_State *L, int idx, const void *p)
 # define LUAMOD_API LUALIB_API
 #endif
 
-
 #define LP_VERSION "path 0.2"
 
+
+/* array routines */
+
+#define ARRAY_MIN_LEN (4)
+#define ARRAY_MAX_LEN (~(unsigned)0 - 100)
+
+#define array_init(A) ((A) = NULL)
+#define array_free(A) array_resize_((void**)&(A), 0, sizeof(*(A)))
+
+#define array_(A) ((ArrayInfo*)(A)-1)
+
+#define array_info(A) ((A) ? array_(A) : NULL)
+#define array_len(A)  ((A) ? array_(A)->len : 0u)
+#define array_cap(A)  ((A) ? array_(A)->cap : 0u)
+#define array_end(A)  ((A) ? &(A)[array_len(A)] : NULL)
+
+#define array_setlen(A,n) ((A) ? array_(A)->len  = (n) : 0u)
+#define array_addlen(A,n) ((A) ? array_(A)->len += (n) : 0u)
+#define array_sublen(A,n) (assert(array_len(A) >= n), array_(A)->len-=(n))
+
+#define array_reset(A)    array_setlen(A, 0)
+#define array_resize(A,n) array_resize_((void**)&(A),(n),sizeof(*(A)))
+#define array_grow(A,n) (array_grow_((void**)&(A),(n),sizeof(*(A))) ?\
+                         array_end(A) : NULL)
+
+typedef struct ArrayInfo { unsigned len, cap; } ArrayInfo;
+
+static int array_resize_(void **pA, size_t cap, size_t objlen) {
+    ArrayInfo *AI, *oldAI = (assert(pA), array_info(*pA));
+    if (cap == 0) { free(oldAI); array_init(*pA); return 1; }
+    AI = (ArrayInfo*)realloc(oldAI, sizeof(ArrayInfo) + cap*objlen);
+    if (AI == NULL) return 0;
+    if (!oldAI) AI->cap = AI->len = 0;
+    if (AI->cap > cap) AI->cap = cap;
+    AI->cap = cap;
+    *pA = (void*)(AI + 1);
+    return 1;
+}
+ 
+static int array_grow_(void **pA, size_t len, size_t objlen) {
+    size_t cap = array_cap(*pA);
+    size_t exp = array_len(*pA) + len;
+    if (cap < exp) {
+        size_t newcap = ARRAY_MIN_LEN;
+        while (newcap < ARRAY_MAX_LEN/objlen && newcap < exp)
+            newcap += newcap;
+        return newcap < exp ? 0 : array_resize_(pA, newcap, objlen);
+    }
+    return 1;
+}
+
+
+/* state */
+
 #if _WIN32
+# define WIN32_LEAN_AND_MEAN
+# include <Windows.h>
+
 # define LP_DIRSEP   "\\"
 # define LP_ALTSEP   "/"
 # define LP_EXTSEP   "."
@@ -78,9 +134,10 @@ typedef int lp_WalkHandler(lp_State *S, void *ud, const char *s, int state);
 struct lp_State {
     lua_State *L;
     /* path buffer data */
-    char      *ptr;
-    size_t     size;
-    size_t     capacity;
+    char      *buf;
+#ifdef _WIN32
+    WCHAR     *wbuf;
+#endif
     /* code page */
     int        current_cp;
 };
@@ -88,7 +145,10 @@ struct lp_State {
 static int lpL_delstate(lua_State *L) {
     lp_State *S = (lp_State*)lua_touserdata(L, 1);
     if (S != NULL) {
-        free(S->ptr);
+        array_free(S->buf);
+#ifdef _WIN32
+        array_free(S->wbuf);
+#endif
         memset(S, 0, sizeof(lp_State));
     }
     return 0;
@@ -105,67 +165,34 @@ static lp_State *lp_getstate(lua_State *L) {
         lua_pushcfunction(L, lpL_delstate);
         lua_setfield(L, -2, "__gc");
         lua_setmetatable(L, -2);
-        S->ptr = (char*)malloc(LP_BUFFERSIZE);
-        S->capacity = LP_BUFFERSIZE;
         lua_rawsetp(L, LUA_REGISTRYINDEX, LP_STATE_KEY);
     }
     lua_pop(L, 1);
     S->L = L;
-    S->size = 0;
-    S->ptr[0] = 0;
+    array_reset(S->buf);
+#ifdef _WIN32
+    array_reset(S->wbuf);
+#endif
     return S;
 }
 
-
-/* buffer routines */
-
-#define lp_buffer(S)      ((S)->ptr)
-#define lp_bufflen(S)    ((S)->size)
-#define lp_setbuffer(S,n) ((S)->size = (n))
-#define lp_addsize(S,sz)  ((S)->size += (sz))
-#define lp_addstring(S,s) lp_addlstring((S),(s),strlen(s))
-
-static char *lp_prepare(lp_State *S, size_t sz) {
-    if (sz > S->capacity || S->capacity - sz < S->size) {
-        char *ptr;
-        size_t expect  = S->size + sz;
-        size_t newsize = LP_BUFFERSIZE;
-        while (newsize < expect && newsize < LP_MAX_SIZET)
-            newsize += newsize >> 1;
-        if (newsize < expect || (ptr = (char*)realloc(S->ptr, newsize)) == NULL) {
-            luaL_error(S->L, "lpath: out of memory");
-            return NULL;
-        }
-        S->ptr = ptr;
-        S->capacity = newsize;
-    }
-    return &S->ptr[S->size];
+static char *lp_prepbuffsize(lp_State *S, size_t len) {
+    char *buf = array_grow(S->buf, len);
+    if (buf == NULL) luaL_error(S->L, "out of memory");
+    return buf;
 }
 
-static char *lp_prepbuffsize(lp_State *S, size_t sz) {
-    char *ptr = lp_prepare(S, sz);
-    if (ptr == NULL) luaL_error(S->L, "path buffer out of memory");
-    return ptr;
-}
+static int lp_addchar(lp_State *S, int ch)
+{ return *lp_prepbuffsize(S, 1) = ch, array_addlen(S->buf, 1); }
 
-static char *lp_prepbuffupdate(lp_State *S, size_t sz, void *ps) {
-    char *p = ps != NULL ? *(char**)ps : NULL;
-    char *ptr = S->ptr;
-    char *newptr = lp_prepbuffsize(S, sz);
-    if (ps != NULL && (p == NULL || (p >= S->ptr && p < S->ptr + S->size)))
-        *(char**)ps = S->ptr + (p == NULL ? 0 : p - ptr);
-    assert(newptr != NULL);
-    return newptr;
-}
+static int lp_addlstring(lp_State *S, const char *s, size_t len)
+{ return memcpy(lp_prepbuffsize(S, len), s, len), array_addlen(S->buf, len); }
 
-static void lp_addchar(lp_State *S, int ch)
-{ *(char*)lp_prepbuffsize(S, 1) = ch; ++S->size; }
-
-static void lp_addlstring(lp_State *S, const void *s, size_t len)
-{ memcpy(lp_prepbuffsize(S, len), s, len); S->size += len; }
+static int lp_addstring(lp_State *S, const char *s)
+{ return lp_addlstring(S, s, strlen(s)); }
 
 static int lp_pushresult(lp_State *S)
-{ lua_pushlstring(S->L, S->ptr, S->size); return 1; }
+{ return lua_pushlstring(S->L, S->buf, array_len(S->buf)), 1; }
 
 
 /* path algorithms */
@@ -275,10 +302,9 @@ static int lp_normpath(lua_State *L, const char *s) {
     const char *path = lp_splitdrive(s);
     int isabs = lp_isdirsep(*path);
     size_t top = 0, pos[LP_MAX_COMPCOUNT];
-    while (s < path)
-        lp_addchar(S, lp_normchar(*s++));
-    if (isabs) lp_addchar(S, LP_DIRSEPCHAR);
-    pos[top++] = lp_bufflen(S) + isabs;
+    while (s < path) lp_addchar(S, lp_normchar(*s++));
+    if (isabs) lp_addchar(S, lp_normchar(*s++));
+    pos[top++] = array_len(S->buf) + isabs;
     while (*s != '\0') {
         const char *e;
         while (lp_isdirsep(*s)) ++s;
@@ -287,9 +313,9 @@ static int lp_normpath(lua_State *L, const char *s) {
         else if (lp_ispardir(s)) {
             s += LP_PARDIRLEN;
             if (top > 1)
-                lp_setbuffer(S, pos[--top]);
+                array_setlen(S->buf, pos[--top]);
             else if (isabs)
-                lp_setbuffer(S, pos[top++]);
+                array_setlen(S->buf, pos[top++]);
             else {
                 lp_addlstring(S, LP_PARDIR, LP_PARDIRLEN);
                 lp_addchar(S, LP_DIRSEPCHAR);
@@ -302,16 +328,14 @@ static int lp_normpath(lua_State *L, const char *s) {
             lua_pushstring(S->L, "path too complicate");
             return -2;
         } else {
-            pos[top++] = lp_bufflen(S);
+            pos[top++] = array_len(S->buf);
             lp_addlstring(S, s, e-s);
             lp_addchar(S, LP_DIRSEPCHAR);
             s = e + 1;
         }
     }
-    if (lp_bufflen(S) == 0)
-        lua_pushstring(L, LP_CURDIR LP_DIRSEP);
-    else
-        lp_pushresult(S);
+    if (array_len(S->buf)) return lp_pushresult(S);
+    lua_pushstring(L, LP_CURDIR LP_DIRSEP);
     return 1;
 }
 
@@ -351,11 +375,11 @@ static int lpL_joinpath(lua_State *L) {
     int i, top = lua_gettop(L);
     lp_State *S = lp_getstate(L);
     for (i = 1; i <= top; ++i) {
-        const char *s = lp_buffer(S);
+        const char *s = S->buf;
         const char *rd = lp_drivehead(luaL_checkstring(L, i));
         const char *d = rd;
         if (!lp_driveequal(&s, &d) || lp_isdirsep(d[0]))
-            lp_setbuffer(S, 0);
+            array_reset(S->buf);
         lp_addstring(S, rd);
         if (d[0] != '\0' && i != top)
             lp_addchar(S, LP_DIRSEPCHAR);
@@ -369,61 +393,78 @@ static int lpL_joinpath(lua_State *L) {
 
 #ifdef _WIN32
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-
 #define LP_PLATFORM      "windows"
 
 #define lp_pusherror(L, t, f) lp_pusherrmsg((L), GetLastError(), (t), (f))
 
 static int lp_pusherrmsg(lua_State *L, DWORD err, const char *title, const char *fn);
 
-static char *lp_addmultibyte(lp_State *S, LPCWSTR ws) {
-    int cp = S->current_cp;
-    int wc = (int)wcslen(ws = ws ? ws : (WCHAR*)lp_buffer(S)), size = (wc+1)*3;
-    char *s = lp_prepbuffupdate(S, size, (void*)&ws);
-    int bc = WideCharToMultiByte(cp, 0, ws, wc+1, s, size, NULL, NULL);
-    if (bc > size) {
-        s = lp_prepbuffupdate(S, size = bc+1, (void*)ws);
-        bc = WideCharToMultiByte(cp, 0, ws, wc+1, s, size, NULL, NULL);
-    }
-    if (bc == 0) {
-        lp_pusherror(S->L, "multibyte", NULL);
-        lua_error(S->L);
-    }
-    lp_addsize(S, bc);
-    return s;
+static WCHAR *lp_prepwbuffsize(lp_State *S, size_t len) {
+    WCHAR *buf = array_grow(S->wbuf, len);
+    if (buf == NULL) luaL_error(S->L, "out of memory");
+    return buf;
 }
 
-static WCHAR *lp_addlwidechar(lp_State *S, LPCSTR s, int bc) {
+static int lp_addlwstring(lp_State *S, LPCWSTR s, size_t len) {
+    memcpy(lp_prepwbuffsize(S, len), s, len*sizeof(WCHAR));
+    return array_addlen(S->wbuf, len);
+}
+
+static WCHAR *lp_addl2wstring(lp_State *S, LPCSTR s, int bc) {
     int cp = S->current_cp;
-    int size = (bc+1)*sizeof(WCHAR);
-    WCHAR *ws = (WCHAR*)lp_prepbuffupdate(S, size, (void*)&s);
+    int size = (bc+1);
+    WCHAR *ws = lp_prepwbuffsize(S, size);
     int wc = MultiByteToWideChar(cp, 0, s, bc+1, ws, size);
     if (wc > bc) {
-        ws = (WCHAR*)lp_prepbuffupdate(S, size = (wc+1)*sizeof(WCHAR), (void*)&s);
+        ws = lp_prepwbuffsize(S, size = (wc+1));
         wc = MultiByteToWideChar(cp, 0, s, bc+1, ws, size);
     }
     if (wc == 0) {
         lp_pusherror(S->L, "unicode", NULL);
         lua_error(S->L);
     }
-    lp_addsize(S, wc*sizeof(WCHAR));
+    array_addlen(S->wbuf, wc-1);
     return ws;
 }
 
-static WCHAR *lp_addwidechar(lp_State *S, LPCSTR s) {
-    int bc = (int)strlen(s = (s ? s : lp_buffer(S)));
-    return lp_addlwidechar(S, s, bc);
+static WCHAR *lp_add2wstring(lp_State *S, LPCSTR s) {
+    int bc = (int)strlen(s = (s ? s : S->buf));
+    return lp_addl2wstring(S, s, bc);
 }
 
-static WCHAR *lp_addwidepath(lp_State *S, LPCSTR s) {
-    int top, bc = (int)strlen(s = (s ? s : lp_buffer(S)));
-    if (bc < MAX_PATH) return lp_addlwidechar(S, s, bc);
-    top = (int)lp_bufflen(S);
-    lp_addlstring(S, L"\\\\?\\", 4*sizeof(WCHAR));
-    lp_addwidechar(S, s);
-    return (WCHAR*)((char*)lp_buffer(S) + top);
+static WCHAR *lp_addlwpath(lp_State *S, LPCSTR s, int bc) {
+    int top;
+    if (bc < MAX_PATH) return lp_addl2wstring(S, s, bc);
+    top = (int)array_len(S->buf);
+    lp_addlwstring(S, L"\\\\?\\", 4);
+    lp_addl2wstring(S, s, bc);
+    return &S->wbuf[top];
+}
+
+static WCHAR *lp_addwpath(lp_State *S, LPCSTR s) {
+    int bc = (int)strlen(s = (s ? s : S->buf));
+    return lp_addlwpath(S, s, bc);
+}
+
+static char *lp_addlw2string(lp_State *S, LPCWSTR ws, int wc) {
+    int cp = S->current_cp, size = (wc + 1) * 3;
+    char *s = lp_prepbuffsize(S, size);
+    int bc = WideCharToMultiByte(cp, 0, ws, wc+1, s, size, NULL, NULL);
+    if (bc > size) {
+        s = lp_prepbuffsize(S, size = bc+1);
+        bc = WideCharToMultiByte(cp, 0, ws, wc+1, s, size, NULL, NULL);
+    }
+    if (bc == 0) {
+        lp_pusherror(S->L, "multibyte", NULL);
+        lua_error(S->L);
+    }
+    array_addlen(S->buf, bc-1);
+    return s;
+}
+
+static char *lp_addw2string(lp_State *S, LPCWSTR ws) {
+    int wc = (int)wcslen(ws = (ws ? ws : S->wbuf));
+    return lp_addlw2string(S, ws, wc);
 }
 
 static const char *lp_win32error(lua_State *L, DWORD errnum) {
@@ -439,7 +480,7 @@ static const char *lp_win32error(lua_State *L, DWORD errnum) {
         0, NULL);
     if (len == 0)
         ret = "get system error message error";
-    if ((ret = lp_prepare(S, len*3)) == NULL)
+    if ((ret = array_grow(S->buf, len*3)) == NULL)
         ret = "error message out of memory";
     else {
         int bc = WideCharToMultiByte(S->current_cp, 0, msg, len,
@@ -450,7 +491,7 @@ static const char *lp_win32error(lua_State *L, DWORD errnum) {
         else if (bc == 0)
             ret = "mutibyte: format error message error";
         else {
-            lp_addsize(S, bc);
+            array_addlen(S->buf, bc);
             lp_addchar(S, '\0');
         }
     }
@@ -472,6 +513,7 @@ static int lp_pusherrmsg(lua_State *L, DWORD err, const char *title, const char 
 static int lpL_ansi(lua_State *L) {
     lp_State *S = lp_getstate(L);
     int cp = S->current_cp;
+    size_t len;
     const char *utf8;
     switch (lua_type(L, 1)) {
     case LUA_TNONE:
@@ -480,11 +522,11 @@ static int lpL_ansi(lua_State *L) {
         S->current_cp = (UINT)lua_tonumber(L, 1);
         return 0;
     case LUA_TSTRING:
-        utf8 = lua_tostring(L, 1);
+        utf8 = lua_tolstring(L, 1, &len);
         S->current_cp = CP_UTF8;
-        lp_addwidechar(S, utf8);
+        lp_addl2wstring(S, utf8, (int)len);
         S->current_cp = cp;
-        lua_pushstring(L, lp_addmultibyte(S, NULL));
+        lua_pushstring(L, lp_addw2string(S, NULL));
         return 1;
     default:
         lua_pushfstring(L, "number/string expected, got %s",
@@ -505,9 +547,9 @@ static int lpL_utf8(lua_State *L) {
         return 0;
     case LUA_TSTRING:
         ansi = lua_tostring(L, 1);
-        lp_addwidechar(S, ansi);
+        lp_add2wstring(S, ansi);
         S->current_cp = CP_UTF8;
-        lua_pushstring(L, lp_addmultibyte(S, NULL));
+        lua_pushstring(L, lp_addw2string(S, NULL));
         S->current_cp = cp;
         return 1;
     default:
@@ -549,13 +591,14 @@ static void lp_pushftime(lua_State *L, PFILETIME pft) {
 }
 
 static int lpL_setenv(lua_State *L) {
-    const char *name = luaL_checkstring(L, 1);
-    const char *value = luaL_optstring(L, 2, NULL);
+    size_t klen, vlen;
+    const char *name = luaL_checklstring(L, 1, &klen);
+    const char *value = luaL_optlstring(L, 2, NULL, &vlen);
     lp_State *S = lp_getstate(L);
     WCHAR *wvalue;
-    lp_addwidechar(S, name);
-    wvalue = value ? lp_addwidechar(S, value) : NULL;
-    if (!SetEnvironmentVariableW((WCHAR*)lp_buffer(S), wvalue))
+    lp_addl2wstring(S, name, klen + 1);
+    wvalue = value ? lp_addl2wstring(S, value, vlen) : NULL;
+    if (!SetEnvironmentVariableW(S->wbuf, wvalue))
         return -lp_pusherror(L, "setenv", NULL);
     lua_settop(L, 2);
     return 1;
@@ -563,50 +606,48 @@ static int lpL_setenv(lua_State *L) {
 
 static int lpL_getenv(lua_State *L) {
     lp_State *S = lp_getstate(L);
-    WCHAR *ret, *ws = lp_addwidechar(S, luaL_checkstring(L, 1));
-    DWORD wc;
-    ret = (WCHAR*)lp_prepbuffupdate(S, MAX_PATH*sizeof(WCHAR), (void*)&ws);
-    wc = GetEnvironmentVariableW(ws, ret, MAX_PATH);
+    WCHAR *ws  = lp_add2wstring(S, luaL_checkstring(L, 1));
+    WCHAR *ret = lp_prepwbuffsize(S, MAX_PATH);
+    DWORD wc   = GetEnvironmentVariableW(ws, ret, MAX_PATH);
     if (wc >= MAX_PATH) {
-        ret = (LPWSTR)lp_prepbuffupdate(S, wc*sizeof(WCHAR), (void*)&ws);
+        ret = lp_prepwbuffsize(S, wc);
         wc = GetEnvironmentVariableW(ws, ret, wc);
     }
     if (wc == 0)
         return -lp_pusherror(S->L, "getenv", NULL);
-    lp_addsize(S, (wc+1)*sizeof(WCHAR));
-    lua_pushstring(L, lp_addmultibyte(S, ret));
+    array_addlen(S->wbuf, wc+1);
+    lua_pushstring(L, lp_addw2string(S, ret));
     return 1;
 }
 
 static int lp_expandvars(lua_State *L, const char *s) {
     lp_State *S = lp_getstate(L);
-    WCHAR *ret, *ws = lp_addwidechar(S, s);
-    DWORD wc;
-    ret = (WCHAR*)lp_prepbuffupdate(S, MAX_PATH*sizeof(WCHAR), (void*)&ws);
-    wc = ExpandEnvironmentStringsW(ws, ret, MAX_PATH);
+    WCHAR *ws  = lp_add2wstring(S, s);
+    WCHAR *ret = lp_prepwbuffsize(S, MAX_PATH);
+    DWORD wc   = ExpandEnvironmentStringsW(ws, ret, MAX_PATH);
     if (wc >= MAX_PATH) {
-        ret = (LPWSTR)lp_prepbuffupdate(S, wc*sizeof(WCHAR), (void*)&ws);
+        ret = lp_prepwbuffsize(S, wc);
         wc = ExpandEnvironmentStringsW(ws, ret, wc);
     }
     if (wc == 0) return lp_pusherror(L, "expandvars", s);
-    lp_addsize(S, wc*sizeof(WCHAR));
-    lua_pushstring(L, lp_addmultibyte(S, ret));
+    array_addlen(S->wbuf, wc);
+    lua_pushstring(L, lp_addw2string(S, ret));
     return 1;
 }
 
 static int lp_readreg(lp_State *S, HKEY hkey, LPCWSTR key) {
-    DWORD size = MAX_PATH * sizeof(WCHAR), ret;
-    WCHAR *wc = (lp_setbuffer(S, 0), (WCHAR*)lp_prepbuffsize(S, size));
+    DWORD size = MAX_PATH, ret;
+    WCHAR *wc = (array_reset(S->wbuf), lp_prepwbuffsize(S, size));
     while ((ret = RegQueryValueExW(hkey, key, NULL, NULL, (LPBYTE)wc, &size))
             != ERROR_SUCCESS) {
         if (ret != ERROR_MORE_DATA) {
-            lua_pushstring(S->L, lp_addmultibyte(S, key));
+            lua_pushstring(S->L, lp_addw2string(S, key));
             return lp_pusherrmsg(S->L, ret, "platform", lua_tostring(S->L, -1));
         }
-        wc = (WCHAR*)lp_prepbuffsize(S, size);
+        wc = lp_prepwbuffsize(S, size);
     }
-    lp_addsize(S, size);
-    lp_addlstring(S, L"", sizeof(WCHAR));
+    array_addlen(S->wbuf, size);
+    lp_addlwstring(S, L"", 1);
     return 0;
 }
 
@@ -621,14 +662,14 @@ static int lpL_platform(lua_State *L) {
         return -lp_pusherrmsg(L, ret, "platform", NULL);
     if ((ret = lp_readreg(S, hkey, L"CurrentBuildNumber")) < 0)
     { ret = -ret; goto out; }
-    build = wcstoul((WCHAR*)lp_buffer(S), NULL, 10);
+    build = wcstoul(S->wbuf, NULL, 10);
     if (RegQueryValueExW(hkey, L"CurrentMajorVersionNumber",
                 NULL, NULL, (LPBYTE)&major, &size) != ERROR_SUCCESS
             || RegQueryValueExW(hkey, L"CurrentMinorVersionNumber",
                 NULL, NULL, (LPBYTE)&minor, &size) != ERROR_SUCCESS) {
         if ((ret = lp_readreg(S, hkey, L"CurrentVersion")) < 0)
         { ret = -ret; goto out; }
-        major = wcstoul((WCHAR*)lp_buffer(S), &dot, 10);
+        major = wcstoul(S->wbuf, &dot, 10);
         if (*dot == L'.') minor = wcstoul(dot + 1, NULL, 10);
     }
     lua_pushfstring(L, "Windows %d.%d Build %d", major, minor, build);
@@ -643,57 +684,55 @@ out:RegCloseKey(hkey);
 
 /* path utils */
 
-typedef DWORD WINAPI LPGETFINALPATHNAMEBYHANDLEW(
+typedef DWORD WINAPI (*LPGETFINALPATHNAMEBYHANDLEW)(
         HANDLE hFile,
         LPWSTR lpszFilePath,
         DWORD cchFilePath,
         DWORD dwFlags);
 
-static LPGETFINALPATHNAMEBYHANDLEW *pGetFinalPathNameByHandleW;
+static LPGETFINALPATHNAMEBYHANDLEW pGetFinalPathNameByHandleW;
 
 static int lp_abs(lua_State *L, const char *s) {
     lp_State *S = lp_getstate(L);
-    WCHAR *ws = lp_addwidepath(S, s);
-    WCHAR *ret = (WCHAR*)lp_prepbuffupdate(S,
-            MAX_PATH*sizeof(WCHAR), (void*)&ws);
+    WCHAR *ws = lp_addwpath(S, s);
+    WCHAR *ret = lp_prepwbuffsize(S, MAX_PATH);
     DWORD wc = GetFullPathNameW(ws, MAX_PATH, ret, NULL);
     if (wc >= MAX_PATH) {
-        ret = (WCHAR*)lp_prepbuffupdate(S, wc*sizeof(WCHAR), (void*)&ws);
+        ret = lp_prepwbuffsize(S, wc);
         wc = GetFullPathNameW(ws, wc, ret, NULL);
     }
     if (wc == 0) return lp_pusherror(L, "abs", s);
-    lp_addsize(S, (wc+1)*sizeof(WCHAR));
-    lua_pushstring(L, lp_addmultibyte(S, ret));
+    array_setlen(S, wc+1);
+    lua_pushstring(L, lp_addw2string(S, ret));
     return 1;
 }
 
 static int lp_solvelink(lua_State *L, const char *s) {
     lp_State *S = lp_getstate(L);
-    WCHAR *ret, *ws = lp_addwidepath(S, s);
+    WCHAR *ret, *ws = lp_addwpath(S, s);
     HANDLE hFile = CreateFileW(ws, /* file to open         */
             0,                     /* open only for handle */
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
             NULL,                  /* default security     */
             OPEN_EXISTING,         /* existing file only   */
-            0,                     /* no file attributes   */
+            FILE_FLAG_BACKUP_SEMANTICS, /* no file attributes   */
             NULL);                 /* no attr. template    */
     DWORD wc;
     if(hFile == INVALID_HANDLE_VALUE)
         return lp_pusherror(L, "open", s);
-    lp_setbuffer(S, 0);
-    ret = (LPWSTR)lp_prepbuffsize(S, MAX_PATH*sizeof(WCHAR));
+    ret = lp_prepwbuffsize(S, MAX_PATH);
     wc = pGetFinalPathNameByHandleW(hFile, ret, MAX_PATH, 0);
     if (wc >= MAX_PATH) {
-        ret = (LPWSTR)lp_prepbuffsize(S, wc*sizeof(WCHAR));
+        ret = lp_prepwbuffsize(S, wc);
         wc = pGetFinalPathNameByHandleW(hFile, ret, wc, 0);
     }
     CloseHandle(hFile);
     if (wc == 0) return lp_pusherror(L, "realpath", s);
-    lp_addsize(S, (wc + 1) * sizeof(WCHAR));
+    array_addlen(S->wbuf, wc + 1);
     if (wc > MAX_PATH + 4)
-        lua_pushstring(L, lp_addmultibyte(S, ret));
+        lua_pushstring(L, lp_addw2string(S, ret));
     else
-        lua_pushstring(L, lp_addmultibyte(S, ret+4));
+        lua_pushstring(L, lp_addw2string(S, ret+4));
     return 1;
 }
 
@@ -701,7 +740,7 @@ static int lp_realpath(lua_State *L, const char *s) {
     if (!pGetFinalPathNameByHandleW) {
         HMODULE hModule = GetModuleHandleA("KERNEL32.dll");
         if (hModule != NULL)
-            pGetFinalPathNameByHandleW = (LPGETFINALPATHNAMEBYHANDLEW*)
+            pGetFinalPathNameByHandleW = (LPGETFINALPATHNAMEBYHANDLEW)
                 GetProcAddress(hModule, "GetFinalPathNameByHandleW");
     }
     if (pGetFinalPathNameByHandleW == NULL)
@@ -710,7 +749,7 @@ static int lp_realpath(lua_State *L, const char *s) {
 }
 
 static int lp_type(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     DWORD attr = GetFileAttributesW(ws);
     int isdir, islink;
     if (attr == INVALID_FILE_ATTRIBUTES)
@@ -751,11 +790,11 @@ retry:
         lp_pusherrmsg(L, d->err, "dir.iter", NULL);
         return lua_error(L);
     }
-    fn = lp_addmultibyte(d->S, d->wfd.cFileName);
+    fn = lp_addw2string(d->S, d->wfd.cFileName);
     while (lp_iscurdir(fn) || lp_ispardir(fn)) {
         if (!FindNextFileW(d->hFile, &d->wfd))
         { d->err = GetLastError(); goto retry; }
-        fn = lp_addmultibyte(d->S, d->wfd.cFileName);
+        fn = lp_addw2string(d->S, d->wfd.cFileName);
     }
     lua_pushstring(L, fn);
     lua_pushstring(L, d->wfd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY?"dir":"file");
@@ -771,11 +810,10 @@ retry:
 static int lp_dir(lua_State *L, const char *s) {
     lp_State *S = lp_getstate(L);
     lp_DirData *d;
-    lp_addwidepath(S, s);
-    lp_setbuffer(S, lp_bufflen(S)-sizeof(WCHAR));
-    lp_addlstring(S, L"\\*", 3*sizeof(WCHAR));
+    lp_addwpath(S, s);
+    lp_addlwstring(S, L"\\*", 3);
     d = (lp_DirData*)lua_newuserdata(L, sizeof(lp_DirData));
-    d->hFile = FindFirstFileW((WCHAR*)lp_buffer(S), &d->wfd);
+    d->hFile = FindFirstFileW(S->wbuf, &d->wfd);
     if (d->hFile == INVALID_HANDLE_VALUE) {
         lp_pusherror(L, "dir", s);
         lua_error(L);
@@ -794,7 +832,7 @@ static int lp_dir(lua_State *L, const char *s) {
 
 static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud) {
     lp_State *S = lp_getstate(L);
-    DWORD err, attr = GetFileAttributesW(lp_addwidechar(S, s));
+    DWORD err, attr = GetFileAttributesW(lp_add2wstring(S, s));
     WIN32_FIND_DATAW wfd;
     int ret = 0, top = 0;
     size_t pos[LP_MAX_COMPCOUNT];
@@ -806,48 +844,48 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
         return h(S, ud, s, LP_WALKFILE);
     wfd.cFileName[0] = 0;
     wfd.dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
-    if ((lp_bufflen(S) -= sizeof(WCHAR)) > 0) {
-        path = (WCHAR*)lp_buffer(S) + lp_bufflen(S)/sizeof(WCHAR);
-        while (--path, lp_isdirsep(*path)) lp_bufflen(S) -= sizeof(WCHAR);
+    if (array_len(S->wbuf) > 0) {
+        path = array_end(S->wbuf);
+        while (--path, lp_isdirsep(*path)) array_sublen(S->wbuf, 1);
     }
-    pos[0] = lp_bufflen(S);
+    pos[0] = array_len(S->wbuf);
     do {
-        size_t len = wcslen(wfd.cFileName)*sizeof(WCHAR);
-        lp_setbuffer(S, pos[top]);
-        lp_addlstring(S, wfd.cFileName, len + sizeof(WCHAR));
+        size_t len = wcslen(wfd.cFileName);
+        array_setlen(S->wbuf, pos[top]);
+        lp_addlwstring(S, wfd.cFileName, len + sizeof(WCHAR));
         if ((wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-            ret = h(S, ud, lp_addmultibyte(S, NULL), LP_WALKFILE);
+            ret = h(S, ud, lp_addw2string(S, NULL), LP_WALKFILE);
             if (ret < 0) break;
         } else if (top < LP_MAX_COMPCOUNT-1
                     && wcscmp(wfd.cFileName, L".")
                     && wcscmp(wfd.cFileName, L".."))
         {
-            ret = h(S, ud, lp_addmultibyte(S, NULL), LP_WALKIN);
+            ret = h(S, ud, lp_addw2string(S, NULL), LP_WALKIN);
             if (ret < 0) break;
             if (ret != 0) {
-                lp_setbuffer(S, pos[top] + len);
-                lp_addlstring(S, L"\\*", 3*sizeof(WCHAR));
-                hFile[++top] = FindFirstFileW((WCHAR*)lp_buffer(S), &wfd);
+                array_setlen(S->wbuf, pos[top] + len);
+                lp_addlwstring(S, L"\\*", 3);
+                hFile[++top] = FindFirstFileW(S->wbuf, &wfd);
                 if (hFile[top] == INVALID_HANDLE_VALUE) {
                     err = GetLastError();
-                    lua_pushstring(L, lp_addmultibyte(S, NULL));
+                    lua_pushstring(L, lp_addw2string(S, NULL));
                     ret = lp_pusherrmsg(L, err, "findfile1", lua_tostring(L, -1));
                     break;
                 }
-                pos[top] = lp_bufflen(S) - 2*sizeof(WCHAR);
+                pos[top] = array_len(S->wbuf) - 2;
                 continue;
             }
         }
         for (; top != 0 && !FindNextFileW(hFile[top], &wfd); --top) {
             if ((err = GetLastError()) != ERROR_NO_MORE_FILES) {
-                lua_pushstring(L, lp_addmultibyte(S, NULL));
+                lua_pushstring(L, lp_addw2string(S, NULL));
                 ret = lp_pusherrmsg(L, err, "findfile2", lua_tostring(L, -1));
                 goto out;
             }
             FindClose(hFile[top]);
-            lp_setbuffer(S, pos[top]);
-            lp_addlstring(S, L"", sizeof(WCHAR));
-            ret = h(S, ud, lp_addmultibyte(S, NULL), LP_WALKOUT);
+            array_setlen(S->wbuf, pos[top]);
+            lp_addlwstring(S, L"", 1);
+            ret = h(S, ud, lp_addw2string(S, NULL), LP_WALKOUT);
             if (ret < 0) goto out;
         }
     } while (top);
@@ -857,29 +895,29 @@ out:while (top) FindClose(hFile[top--]);
 
 static int lpL_getcwd(lua_State *L) {
     lp_State *S = lp_getstate(L);
-    WCHAR *ret = (WCHAR*)lp_prepbuffsize(S, MAX_PATH*sizeof(WCHAR));
+    WCHAR *ret = lp_prepwbuffsize(S, MAX_PATH);
     DWORD wc = GetCurrentDirectoryW(MAX_PATH, ret);
     if (wc >= MAX_PATH) {
-        ret = (WCHAR*)lp_prepbuffsize(S, wc*sizeof(WCHAR));
+        ret = lp_prepwbuffsize(S, wc);
         wc = GetCurrentDirectoryW(wc, ret);
     }
     if (wc == 0) return lp_pusherror(L, "getcwd", NULL);
-    lp_addsize(S, (wc + 1) * sizeof(WCHAR));
-    lua_pushstring(L, lp_addmultibyte(S, ret));
+    array_setlen(S->wbuf, wc + 1);
+    lua_pushstring(L, lp_addw2string(S, ret));
     return 1;
 }
 
 static int lpL_binpath(lua_State *L) {
     lp_State *S = lp_getstate(L);
-    WCHAR *ret = (WCHAR*)lp_prepbuffsize(S, MAX_PATH*sizeof(WCHAR));
+    WCHAR *ret = lp_prepwbuffsize(S, MAX_PATH);
     DWORD wc = GetModuleFileNameW(NULL, ret, MAX_PATH);
     if (wc > MAX_PATH) {
-        ret = (WCHAR*)lp_prepbuffsize(S, wc*sizeof(WCHAR));
+        ret = lp_prepwbuffsize(S, wc);
         wc = GetModuleFileNameW(NULL, ret, wc);
     }
     if (wc == 0) return lp_pusherror(L, "binpath", NULL);
-    lp_addsize(S, (wc + 1) * sizeof(WCHAR));
-    lua_pushstring(L, lp_addmultibyte(S, ret));
+    array_setlen(S->wbuf, wc + 1);
+    lua_pushstring(L, lp_addw2string(S, ret));
     return 1;
 }
 
@@ -887,10 +925,11 @@ static int lpL_tmpdir(lua_State* L) {
     size_t len;
     const char *s, *prefix = luaL_optstring(L, 1, "lua_");
     lp_State *S = lp_getstate(L);
-    WCHAR tmpdir[MAX_PATH + 1];
-    if (GetTempPathW(MAX_PATH + 1, tmpdir) == 0)
-        return -lp_pusherror(L, "tmpdir", NULL);
-    lua_pushstring(L, lp_addmultibyte(S, tmpdir));
+    DWORD wc = GetTempPathW(MAX_PATH, lp_prepwbuffsize(S, MAX_PATH));
+    if (wc > MAX_PATH) wc = GetTempPathW(wc, lp_prepwbuffsize(S, wc));
+    if (wc == 0) return -lp_pusherror(L, "tmpdir", NULL);
+    array_addlen(S->wbuf, wc);
+    lua_pushstring(L, lp_addw2string(S, NULL));
     s = lua_tolstring(L, -1, &len);
     srand(((int)(ptrdiff_t)&L) ^ clock());
     do {
@@ -899,23 +938,23 @@ static int lpL_tmpdir(lua_State* L) {
             "%s%s%d" LP_DIRSEP : "%s" LP_DIRSEP "%s%d" LP_DIRSEP;
         lua_settop(L, 3);
         lua_pushfstring(L, fmt, s, prefix, magic);
-        lp_setbuffer(S, 0);
-    } while (GetFileAttributesW(lp_addwidepath(S, lua_tostring(L, -1))) !=
+        array_reset(S->wbuf);
+    } while (GetFileAttributesW(lp_addwpath(S, lua_tostring(L, -1))) !=
             INVALID_FILE_ATTRIBUTES);
-    if (!CreateDirectoryW(lp_addwidepath(S, lua_tostring(L, -1)), NULL))
-        return -lp_pusherror(L, "tmpdir", lp_addmultibyte(S, NULL));
+    if (!CreateDirectoryW(S->wbuf, NULL))
+        return -lp_pusherror(L, "tmpdir", lua_tostring(L, -1));
     return 1;
 }
 
 static int lp_chdir(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     if (!SetCurrentDirectoryW(ws))
         return lp_pusherror(L, "chdir", s);
     return 0;
 }
 
 static int lp_mkdir(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     if (!CreateDirectoryW(ws, NULL)) {
         DWORD err = GetLastError();
         if (err == ERROR_ALREADY_EXISTS)
@@ -926,7 +965,7 @@ static int lp_mkdir(lua_State *L, const char *s) {
 }
 
 static int lp_rmdir(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     if (!RemoveDirectoryW(ws))
         return lp_pusherror(L, "rmdir", s);
     return 0;
@@ -938,8 +977,8 @@ static int lp_makedirs(lua_State *L, const char *s) {
     DWORD err;
     int rets;
     if ((rets = lp_normpath(L, s)) < 0) return rets;
-    lp_setbuffer(S, 0);
-    ws = lp_addwidepath(S, s = lua_tostring(L, -1));
+    array_reset(S->buf);
+    ws = lp_addwpath(S, s = lua_tostring(L, -1));
     cur = ws + (lp_splitdrive(s) - s);
     if (lp_isdirsep(*cur)) ++cur;
     for (old = *cur; old != 0; *cur = old, ++cur) {
@@ -949,15 +988,17 @@ static int lp_makedirs(lua_State *L, const char *s) {
         if (CreateDirectoryW(ws, NULL)
                 || (err = GetLastError()) == ERROR_ALREADY_EXISTS)
             continue;
-        lua_pushstring(L, lp_addmultibyte(S, ws));
+        lua_pushstring(L, lp_addw2string(S, ws));
         return lp_pusherrmsg(L, err, "makedirs", lua_tostring(L, -1));
     }
     return 0;
 }
 
 static int rmdir_walker(lp_State *S, void *ud, const char *s, int state) {
-    LPCWSTR ws = lp_addwidechar(S, s);
+    LPCWSTR ws;
     (void)ud;
+    array_reset(S->wbuf);
+    ws = lp_add2wstring(S, s);
     if (state == LP_WALKIN)
         return 1;
     if (state == LP_WALKFILE && !DeleteFileW(ws))
@@ -968,7 +1009,7 @@ static int rmdir_walker(lp_State *S, void *ud, const char *s, int state) {
 }
 
 static int unlock_walker(lp_State *S, void *ud, const char *s, int state) {
-    LPCWSTR ws = lp_addwidechar(S, s);
+    LPCWSTR ws = lp_add2wstring(S, s);
     (void)ud;
     if (state == LP_WALKIN)
         return 1;
@@ -983,7 +1024,7 @@ static int unlock_walker(lp_State *S, void *ud, const char *s, int state) {
 /* file utils */
 
 static int lp_exists(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     HANDLE hFile = CreateFileW(ws, /* file to open         */
             FILE_WRITE_ATTRIBUTES, /* open only for handle */
             FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
@@ -997,12 +1038,12 @@ static int lp_exists(lua_State *L, const char *s) {
 }
 
 static int lp_remove(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     return DeleteFileW(ws) ? 1 : lp_pusherror(L, "remove", s);
 }
 
 static int lp_fsize(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     WIN32_FILE_ATTRIBUTE_DATA fad;
     ULARGE_INTEGER ul;
     if (!GetFileAttributesExW(ws, GetFileExInfoStandard, &fad))
@@ -1014,7 +1055,7 @@ static int lp_fsize(lua_State *L, const char *s) {
 }
 
 static int lp_ftime(lua_State *L, const char *s) {
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     WIN32_FILE_ATTRIBUTE_DATA fad;
     if (!GetFileAttributesExW(ws, GetFileExInfoStandard, &fad))
         return lp_pusherror(L, "ftime", s);
@@ -1026,7 +1067,7 @@ static int lp_ftime(lua_State *L, const char *s) {
 
 static int lpL_touch(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    LPCWSTR ws = lp_addwidepath(lp_getstate(L), s);
+    LPCWSTR ws = lp_addwpath(lp_getstate(L), s);
     FILETIME at, mt;
     SYSTEMTIME st;
     HANDLE hFile = CreateFileW(ws, /* file to open       */
@@ -1052,12 +1093,11 @@ static int lpL_touch(lua_State *L) {
 
 static int lpL_rename(lua_State *L) {
     lp_State *S = lp_getstate(L);
-    const char *from = luaL_checkstring(L, 1);
-    const char *to = luaL_checkstring(L, 2);
-    WCHAR *wto;
-    lp_addwidepath(S, from);
-    wto = lp_addwidepath(S, to);
-    if (!MoveFileW((WCHAR*)lp_buffer(S), wto))
+    size_t flen, tlen;
+    const char *from = luaL_checklstring(L, 1, &flen);
+    const char *to = luaL_checklstring(L, 2, &tlen);
+    WCHAR *wto = (lp_addlwpath(S, from, flen+1), lp_addlwpath(S, to, tlen));
+    if (!MoveFileW(S->wbuf, wto))
         return -lp_pusherror(L, "rename", to);
     lua_pushboolean(L, 1);
     return 1;
@@ -1065,13 +1105,12 @@ static int lpL_rename(lua_State *L) {
 
 static int lpL_copy(lua_State *L) {
     lp_State *S = lp_getstate(L);
-    const char *from = luaL_checkstring(L, 1);
-    const char *to = luaL_checkstring(L, 2);
+    size_t flen, tlen;
+    const char *from = luaL_checklstring(L, 1, &flen);
+    const char *to = luaL_checklstring(L, 2, &tlen);
     int failIfExists = lua_toboolean(L, 3);
-    WCHAR *wto;
-    lp_addwidepath(S, from);
-    wto = lp_addwidepath(S, to);
-    if (!CopyFileW((WCHAR*)lp_buffer(S), wto, failIfExists))
+    WCHAR *wto = (lp_addlwpath(S, from, flen+1), lp_addlwpath(S, to, tlen));
+    if (!CopyFileW(S->wbuf, wto, failIfExists))
         return -lp_pusherror(L, "copy", to);
     lua_pushboolean(L, 1);
     return 1;
@@ -1083,9 +1122,9 @@ static int lpL_cmpftime(lua_State *L) {
     int use_atime = lua_toboolean(L, 3);
     LONG cmp_c, cmp_m, cmp_a;
     WCHAR *wf2;
-    lp_addwidepath(S, luaL_checkstring(L, 1));
-    wf2 = lp_addwidepath(S, luaL_checkstring(L, 2));
-    if (!GetFileAttributesExW((WCHAR*)lp_buffer(S), GetFileExInfoStandard, &fad1))
+    lp_addwpath(S, luaL_checkstring(L, 1));
+    wf2 = lp_addwpath(S, luaL_checkstring(L, 2));
+    if (!GetFileAttributesExW(S->wbuf, GetFileExInfoStandard, &fad1))
         lua_pushinteger(L, -1);
     else if (!GetFileAttributesExW(wf2, GetFileExInfoStandard, &fad2))
         lua_pushinteger(L, 1);
@@ -1131,7 +1170,6 @@ static int lpL_cmpftime(lua_State *L) {
 static int lp_pusherror(lua_State *L, const char *title, const char *fn) {
     int err = errno;
     const char *msg = strerror(errno);
-    (void)lp_prepbuffupdate;
     lua_pushnil(L);
     if (title && fn)
         lua_pushfstring(L, "%s:%s:(errno=%d): %s", title, fn, err, msg);
@@ -1156,6 +1194,9 @@ static int lpL_utf8(lua_State *L) {
 
 
 /* misc utils */
+
+static char *lp_truncbuffer(lp_State *S)
+{ *lp_prepbuffsize(S, 1) = 0; return S->buf; }
 
 static void lp_pushuint64(lua_State *L, unsigned long long ull) {
     if (sizeof(lua_Integer) >= 8)
@@ -1242,7 +1283,7 @@ static int lp_abs(lua_State *L, const char *s) {
         char *ret = lp_prepbuffsize(S, PATH_MAX);
         if (getcwd(ret, PATH_MAX) == NULL)
             return lp_pusherror(L, "getcwd", NULL);
-        lp_addsize(S, strlen(ret));
+        array_addlen(S->buf, strlen(ret));
         lp_addchar(S, LP_DIRSEPCHAR);
         lp_addstring(S, s);
         return lp_pushresult(S);
@@ -1365,22 +1406,21 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
     lp_addlstring(S, s, len), pos[top] = len;
     do {
         if (top) {
-            lp_setbuffer(S, pos[top]);
+            array_setlen(S->buf, pos[top]);
             lp_addstring(S, data->d_name);
         }
         if (isdir == 0) {
-            *lp_prepbuffsize(S, 1) = 0;
-            ret = h(S, ud, lp_buffer(S), LP_WALKFILE);
+            ret = h(S, ud, lp_truncbuffer(S), LP_WALKFILE);
             if (ret < 0) goto out;
         } else if (top < LP_MAX_COMPCOUNT-1) {
-            size_t len = lp_bufflen(S) + 1;
+            size_t len = array_len(S->buf) + 1;
             lp_addlstring(S, "/", 2);
-            ret = h(S, ud, lp_buffer(S), LP_WALKIN);
+            ret = h(S, ud, S->buf, LP_WALKIN);
             if (ret < 0) goto out;
             if (ret != 0) {
-                dir[++top] = opendir(lp_buffer(S));
+                dir[++top] = opendir(S->buf);
                 if (dir[top] == NULL) {
-                    ret = lp_pusherror(L, "opendir", lp_buffer(S));
+                    ret = lp_pusherror(L, "opendir", S->buf);
                     goto out;
                 }
                 pos[top] = len;
@@ -1388,9 +1428,8 @@ static int lp_walkpath(lua_State *L, const char *s, lp_WalkHandler *h, void *ud)
         }
         while (top && (ret = lp_readdir(L, dir[top], &data, &buf)) <= 0) {
             if (ret < 0) goto out;
-            lp_setbuffer(S, pos[top--]);
-            *lp_prepbuffsize(S, 1) = 0;
-            ret = h(S, ud, lp_buffer(S), LP_WALKOUT);
+            array_setlen(S->buf, pos[top--]);
+            ret = h(S, ud, lp_truncbuffer(S), LP_WALKOUT);
             if (ret < 0) goto out;
         }
         isdir = S_ISDIR(buf.st_mode);
@@ -1452,10 +1491,9 @@ static int lp_makedirs(lua_State *L, const char *s) {
     char *dir, *cur, old;
     int rets;
     if ((rets = lp_normpath(L, s)) < 0) return rets;
-    lp_setbuffer(S, 0);
+    array_reset(S->buf);
     lp_addstring(S, lua_tostring(L, -1));
-    lp_addchar(S, '\0');
-    dir = lp_buffer(S);
+    dir = lp_truncbuffer(S);
     cur = dir + (lp_splitdrive(s) - s);
     if (lp_isdirsep(*cur)) ++cur;
     for (old = *cur; old != 0; *cur = old, ++cur) {
@@ -2026,9 +2064,9 @@ LUAMOD_API int luaopen_path_info(lua_State *L) {
 
 LP_NS_END
 
-/* cc: flags+='-Wextra --coverage' run='lua test.lua'
+/* cc: flags+='-ggdb -Wextra -Wno-cast-function-type --coverage' run='lua test.lua'
  * unixcc: flags+='-s -O3 -shared -fPIC' output='path.so'
- * maccc: flags+='-s -O3 -shared -undefined dynamic_lookup' output='path.so'
+ * maccc: flags+='-O3 -shared -undefined dynamic_lookup' output='path.so'
  * win32cc: flags+='-s -O3 -mdll -DLUA_BUILD_AS_DLL'
- * win32cc: libs+='-llua53' output='path.dll' */
+ * win32cc: libs+='-llua54' output='path.dll' */
 

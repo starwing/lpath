@@ -170,7 +170,7 @@ test "join" {
 test "abs" {
    windows = function()
       local cwd = fs.getcwd()
-      local dir = assert(fs.tmpdir())
+      local dir = assert(fs.realpath(assert(fs.tmpdir())))
       fs.chdir(dir)
       assert(fs.touch "test")
       eq(path(fs.getcwd(), "test"), path.abs "test")
