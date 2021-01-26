@@ -1944,9 +1944,10 @@ static int lp_unlock(lua_State *L, const char *s)
 static const char *lp_checkpathargs(lua_State *L, size_t *plen) {
     int top = lua_gettop(L);
     if (top == 0) {
-        const char *r = lua_pushstring(L, "." LP_DIRSEP);
-        if (plen) *plen = lua_rawlen(L, -1);
-        return r;
+        const char r[] = "." LP_DIRSEP;
+        lua_pushstring(L, r);
+        if (plen) *plen = sizeof(r) - 1;
+        return "." LP_DIRSEP;
     } else if (top == 1)
         return luaL_checklstring(L, 1, plen);
     lpL_joinpath(L);
