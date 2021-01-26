@@ -246,6 +246,10 @@ Functions:
 > split file path into base name and extension name.
 > e.g. `\foo\bar\baz.exe` into `\foo\bar\baz` and `.exe`.
 
+- `path.trim([comp]) -> string`
+> trim the path's trailling dir sep (and possibly spaces).
+> e.g. `  \a\b\c\  ` into `\a\b\c`.
+
 
 License
 =======

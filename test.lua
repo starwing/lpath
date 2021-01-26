@@ -449,6 +449,23 @@ function _G.test_splitext()
    eq(a, "a.b/.c"); eq(b, ".d")
 end
 
+function _G.test_trim()
+   local s = "/a/b/c/d/"
+   local d = {
+      "/a/b/c/d",
+      "/a/b/c",
+      "/a/b",
+      "/a",
+      "/"
+   }
+   local i = 1
+   while s ~= "/" do
+      s = path.trim((path.split(s)))
+      eq(s, d[i])
+      i = i + 1
+   end
+end
+
 function _G.test_dir()
    local cwd = fs.getcwd()
    local dir = assert(fs.tmpdir())
