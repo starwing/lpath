@@ -26,8 +26,11 @@ static int lua53_rawgetp(lua_State *L, int idx, const void *p)
 # define luaL_newlib(L,libs) luaL_register(L, lua_tostring(L, 1), libs);
 static int lua53_rawgetp(lua_State *L, int idx, const void *p)
 { lua_pushlightuserdata(L, (void*)p); lua_rawget(L, idx); return lua_type(L, -1); }
-static int lua_rawsetp(lua_State *L, int idx, const void *p)
+#ifndef lua_rawsetp
+#define lua_rawsetp lua_rawsetp
+static void lua_rawsetp(lua_State *L, int idx, const void *p)
 { lua_pushlightuserdata(L, (void*)p); lua_insert(L, -2); lua_rawset(L, idx); }
+#endif
 #endif
 
 #ifndef LUAMOD_API
@@ -1747,7 +1750,7 @@ static int glob_walker(lp_State *S, void *ud, const char *s, int state) {
             if (!lp_fnmatch(sparts[i-1], gs->pparts[j-1]))
                 return 1;
         lua_pushstring(gs->L, s);
-        lua_rawseti(gs->L, 3, gs->idx++);
+        lua_rawseti(gs->L, 3, (int)gs->idx++);
     }
     return 1;
 }
