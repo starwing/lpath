@@ -94,15 +94,15 @@ test "buffer" {
       local name = (("a"):rep(256).."/"):rep(32)
       local result = (("a"):rep(256).."\\"):rep(32)
       eq(path(name), result)
-      name = ("a".."/"):rep(256)
-      fail("path too complicate", assert, path(name))
+      -- name = ("a".."/"):rep(256)
+      -- fail("path too complicate", assert, path(name))
    end;
 
    posix = function()
       local name = (("a"):rep(256).."/"):rep(32)
       eq(path(name), name)
-      name = ("a".."/"):rep(256)
-      fail("path too complicate", assert, path(name))
+      -- name = ("a".."/"):rep(256)
+      -- fail("path too complicate", assert, path(name))
    end;
 }
 
