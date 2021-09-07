@@ -4,79 +4,79 @@ local table_eq = unit.assertItemsEquals
 local is_true  = unit.assertTrue
 local fail     = unit.assertErrorMsgMatches
 
-local path = require "path"
+local path, loc = require "path"
 local info = require "path.info"
 local fs   = require "path.fs"
+local env  = require "path.env"
 
-print("platform:", assert(fs.platform()))
+print(loc)
+print("uname:", assert(env.uname()))
 print("binpath:", assert(fs.binpath()))
 print("getcwd:", assert(fs.getcwd()))
 
 local dir_table = {
-   name = "test";
-   { name = "test1";
-     "file1";
-     "file2";
-     "file3";
+   test = {
+      test1 = { "file1"; "file2"; "file3"; },
+      test2 = { "file1"; "file2"; "file3"; },
+      test3 = { "file1"; "file2"; "file3"; },
+      "test4";
    },
-   { name = "test2";
-     "file1";
-     "file2";
-     "file3";
-   },
-   { name = "test3";
-     "file1";
-     "file2";
-     "file3";
-   },
-   "test4";
 }
 
+local glob_tree = {
+   test_glob = {
+      case_1 = {
+         a = { a = { a = { a = { c = { a = { "a", "b" } } } } } },
+      },
+      case_2 = {
+         a = { a = { a = { a = { a = { a = { "b" } } } } } },
+      }
+   }
+}
+
+local function in_tmpdir(name)
+   local f = _G[name]
+   local t = {}
+   function t:setup()
+      self.cwd = fs.getcwd()
+      assert(fs.chdir(assert(fs.tmpdir())))
+   end
+   function t:teardown()
+      assert(fs.chdir(self.cwd))
+   end
+   t.test = f
+   _G[name] = t
+end
+
 local function maketree(t)
-   if t.name then
-      assert(fs.mkdir(assert(t.name)))
-      assert(fs.chdir(assert(t.name)))
-   end
-   for _, v in ipairs(t) do
-      if type(v) == "string" then
-         assert(fs.touch(v))
-      else
+   for k, v in pairs(t) do
+      if type(k) == "string" then
+         assert(fs.mkdir(k))
+         assert(fs.chdir(k))
          maketree(v)
-      end
-   end
-   if t.name then
-      assert(fs.chdir "..")
-   end
-end
-
-local function collect_tree(t, r, p)
-   local rt = r or {}
-   local prefix = path(t.name, "")
-   if p then prefix = path(p, prefix) end
-   rt[#rt+1] = prefix
-   for _, v in ipairs(t) do
-      if type(v) == "string" then
-         rt[#rt+1] = path(prefix, v)
+         assert(fs.chdir "..")
       else
-         collect_tree(v, rt, prefix)
+         assert(fs.touch(v))
       end
-   end
-   return rt
-end
-
-local function test(name)
-   return function(t)
-      local plat = info.platform
-      local f = t[info.platform]
-      if not f and plat ~= "windows" then
-         f = t.posix
-      end
-      if f then _G["test_"..name] = f end
    end
 end
 
-test "codepage" {
-   windows = function()
+local function collect_tree(t, r, prefix)
+   r = r or {}
+   prefix = prefix or ""
+   for k, v in pairs(t) do
+      if type(k) == "string" then
+         r[#r+1] = path(prefix, k)
+         collect_tree(v, r, r[#r])
+      else
+         r[#r+1] = path(prefix, v)
+      end
+   end
+   return r
+end
+
+function _G.test_codepage()
+   if info.platform == "windows" then
       path.ansi()
       path.utf8()
       eq(path.ansi"abc", "abc")
@@ -86,30 +86,56 @@ test "codepage" {
            path.ansi, false)
       fail(".-number/string expected, got boolean.*",
            path.utf8, false)
-   end;
-}
+   end
+end
 
-test "buffer" {
-   windows = function()
+function _G.test_path()
+   if info.platform == "windows" then
+      eq(path 'a/b/c',     'a\\b\\c')
+      eq(path 'c:/a/b/c',  'C:\\a\\b\\c')
+      eq(path '//a/b',     '\\\\A\\B\\')
+      eq(path '//a/b/c',   '\\\\A\\B\\c')
+      eq(path '//a/b/c/d', '\\\\A\\B\\c\\d')
+      eq(path "a/",        "a\\")
+      eq(path "c:",        "C:")
+
       local name = (("a"):rep(256).."/"):rep(32)
       local result = (("a"):rep(256).."\\"):rep(32)
       eq(path(name), result)
       -- name = ("a".."/"):rep(256)
       -- fail("path too complicate", assert, path(name))
-   end;
 
-   posix = function()
-      local name = (("a"):rep(256).."/"):rep(32)
-      eq(path(name), name)
-      -- name = ("a".."/"):rep(256)
-      -- fail("path too complicate", assert, path(name))
-   end;
-}
+      eq(path('C:/a/b', 'x/y'), 'C:\\a\\b\\x\\y')
+      eq(path('C:/a/b', '/x/y'), 'C:\\x\\y')
+      eq(path('C:/a/b', 'D:x/y'), 'D:x\\y')
+      eq(path('C:/a/b', 'D:/x/y'), 'D:\\x\\y')
+      eq(path('C:/a/b', '//host/share/x/y'), '\\\\HOST\\SHARE\\x\\y')
+      eq(path('C:/a/b', 'c:x/y'), 'C:\\a\\b\\x\\y')
+      eq(path('C:/a/b', 'c:/x/y'), 'C:\\x\\y')
 
-test "normpath" {
-   windows = function()
-      fail(".-string expected.*", path)
-      eq(path(""), [[.\]])
+      eq(path("a", ""), "a\\")
+      eq(path("/a/../../b"), "\\b")
+      eq(path("a/../../../b"), "..\\..\\b")
+      eq(path("a", "b", "c"), 'a\\b\\c')
+      eq(path("foo/../bar", "123", "."), 'bar\\123\\')
+      eq(path("c:a", "d:b", "c"), 'D:b\\c')
+      eq(path("c:a", "d:", "c"), 'D:c')
+      eq(path("c:a", "/", "c"), 'C:\\c')
+      eq(path("a", "/b", "c"), '\\b\\c')
+      eq(path("a", "//foo/bar", "c"), '\\\\FOO\\BAR\\c')
+      eq(path("//./foo", "//./bar"), "\\\\.\\BAR\\")
+      eq(path("//?/foo", "//?/bar"), "\\\\?\\foo\\bar")
+
+      path.utf8()
+      path.ansi()
+      eq(path("a", ""),            "a\\")
+      eq(path("a", "b"),           "a\\b")
+      eq(path("a", "b"),           "a\\b")
+      eq(path("", "a/", "b/"),     "a\\b\\")
+      eq(path("", "a/", "/b"),     "\\b")
+      eq(path("c:", "a/", "d:/b"), "D:\\b")
+
+      eq(path(""), [[.]])
       eq(path("a"), [[a]])
       eq(path("a/."), [[a\]])
       eq(path("a/./b"), [[a\b]])
@@ -118,16 +144,41 @@ test "normpath" {
       eq(path("/a/../../b"), [[\b]])
       eq(path("a/"), [[a\]])
       eq(path("a/b"), [[a\b]])
-      eq(path(".."), [[..\]])
-      eq(path("../.."), [[..\..\]])
+      eq(path(".."), [[..]])
+      eq(path("../.."), [[..\..]])
       eq(path("//a/b/c"), [[\\A\B\c]])
       eq(path("a:b/c"), [[A:b\c]])
       eq(path("c:/b/c"), [[C:\b\c]])
-   end;
+   else
+      eq(path("a/"), "a/")
+      eq(path("/a"), "/a")
+      eq(path("//a"), "//a")
+      eq(path("///a"), "/a")
+      eq(path.anchor("/a"), "/")
+      eq(path.anchor("//a"), "//")
+      eq(path.anchor("///a"), "/")
+      eq(path.parent(".."), "../..")
+      eq(path.parent("../"), "../..")
+      eq(path.parent("../foo/bar"), "../foo")
 
-   posix = function()
-      fail(".-string expected.*", path)
-      eq(path(""), [[./]])
+      local name = (("a"):rep(256).."/"):rep(32)
+      eq(path(name), name)
+      -- name = ("a".."/"):rep(256)
+      -- fail("path too complicate", assert, path(name))
+
+      eq(path("a", ""), "a/")
+      eq(path("/a/../../b"), "/b")
+
+      path.utf8()
+      path.ansi()
+      eq(path("a", ""),            "a/")
+      eq(path("a", "b"),           "a/b")
+      eq(path("", "a/", "b/"),     "a/b/")
+      eq(path("", "a/", "/b"),     "/b")
+      eq(path("c:", "a/", "d:/b"), "c:/a/d:/b")
+
+      eq(path(), '.')
+      eq(path(""), [[.]])
       eq(path("a"), [[a]])
       eq(path("a/"), [[a/]])
       eq(path("a/."), [[a/]])
@@ -137,257 +188,144 @@ test "normpath" {
       eq(path("/a/../../b"), [[/b]])
       eq(path("/a/../../../../../../../../../..//b"), [[/b]])
       eq(path("a/b"), [[a/b]])
-      eq(path(".."), [[../]])
-      eq(path("../.."), [[../../]])
-      eq(path("//a/b/c"), [[/a/b/c]])
+      eq(path(".."), [[..]])
+      eq(path("../.."), [[../..]])
+      eq(path("//a/b/c"), [[//a/b/c]])
       eq(path("a:b/c"), [[a:b/c]])
       eq(path("c:/b/c"), [[c:/b/c]])
-   end;
-}
+   end
+end
 
-test "join" {
-   windows = function()
-      path.ansi()
-      eq(path("a", ""), [[a\]])
-      eq(path("a", "b"), [[a\b]])
-      eq(path("a", "b"), path.join("a", "b"))
-      eq(path("", "a/", "b/"), [[a\b\]])
-      eq(path("", "a/", "/b"), [[\b]])
-      eq(path("c:", "a/", "d:/b"), [[D:\b]])
-   end;
+function _G.test_driveroot()
+   if info.platform == "windows" then
+      eq(path.drive 'c:',        'C:')
+      eq(path.drive 'c:a/b',     'C:')
+      eq(path.drive 'c:/',       'C:')
+      eq(path.drive 'c:/a/b/',   'C:')
+      eq(path.drive '//a/b',     '\\\\A\\B')
+      eq(path.drive '//a/b/',    '\\\\A\\B')
+      eq(path.drive '//a/b/c/d', '\\\\A\\B')
+      eq(path.root 'c:',        '')
+      eq(path.root 'c:a/b',     '')
+      eq(path.root 'c:/',       '\\')
+      eq(path.root 'c:/a/b/',   '\\')
+      eq(path.root '//a/b',     '\\')
+      eq(path.root '//a/b/',    '\\')
+      eq(path.root '//a/b/c/d', '\\')
 
-   posix = function()
-      path.ansi()
-      eq(path("a", ""), [[a/]])
-      eq(path("a", "b"), [[a/b]])
-      eq(path("a", "b"), path.join("a", "b"))
-      eq(path("", "a/", "b/"), [[a/b/]])
-      eq(path("", "a/", "/b"), [[/b]])
-      eq(path("c:", "a/", "d:/b"), [[c:/a/d:/b]])
-   end;
-}
+      eq(path.anchor "/a", "\\")
+      eq(path.anchor "//a", "\\")
+      eq(path.anchor "///a", "\\")
+      eq(path.anchor 'c:', 'C:')
+      eq(path.anchor 'c:a/b', 'C:')
+      eq(path.anchor 'c:/', 'C:\\')
+      eq(path.anchor 'c:/a/b/', 'C:\\')
+      eq(path.anchor '//a/b', '\\\\A\\B\\')
+      eq(path.anchor '//a/b/', '\\\\A\\B\\')
+      eq(path.anchor '//a/b/c/d', '\\\\A\\B\\')
 
-test "abs" {
-   windows = function()
-      local cwd = fs.getcwd()
-      local dir = assert(fs.realpath(assert(fs.tmpdir())))
-      fs.chdir(dir)
-      assert(fs.touch "test")
-      eq(path(fs.getcwd(), "test"), path.abs "test")
-      eq(path(fs.getcwd(), "test"), fs.realpath "test")
-      fs.chdir(cwd)
-      is_true(path.isabs "/")
-      is_true(path.isabs "c:/")
-      is_true(path.isabs "//aaa/bb/")
-      is_true(not path.isabs "aa/bb/")
-      is_true(not path.isabs "c:")
-      is_true(not path.isabs "c:aa/bb")
-      is_true(not path.isabs "//aaa/bb")
-   end;
+      eq(path.drive("//."), "")
+      eq(path.root("//."), "\\")
+      eq(path.drive("//./"), "\\\\.\\")
+      eq(path.root("//./"), "\\")
+      eq(path.drive("//.//"), "")
+      eq(path.root("//.//"), "\\")
+      eq(path.drive("//?"), "")
+      eq(path.root("//?"), "\\")
+      eq(path.drive("//?/"), "\\\\?\\")
+      eq(path.root("//?/"), "")
+      eq(path.drive("//?/c:"), "\\\\?\\C:")
+      eq(path.root("//?/c:") ,"")
+      eq(path.drive("//?/c:/"), "\\\\?\\C:")
+      eq(path.root("//?/c:/"), "\\")
+      eq(path.root("/a"), "\\")
+      eq(path.root("//a"), "\\")
+      eq(path.root("///a"), "\\")
 
-   posix = function()
-      local cwd = fs.getcwd()
-      local dir = assert(fs.tmpdir())
-      fs.chdir(dir)
-      assert(fs.touch "test")
-      eq(path(fs.getcwd(), "test"), path.abs "test")
-      fs.chdir(cwd)
-      is_true(path.isabs "/")
-      is_true(not path.isabs "c:/")
-      is_true(path.isabs "//aaa/bb/")
-      is_true(not path.isabs "aa/bb/")
-      is_true(not path.isabs "c:")
-      is_true(not path.isabs "c:aa/bb")
-      is_true(path.isabs "//aaa/bb")
-   end;
-}
+      eq(path.drive "a/b",        "")
+      eq(path.drive "c:a/b",      "C:")
+      eq(path.drive "c:/a/b",     "C:")
+      eq(path.drive "cd:/a/b",    "")
+      eq(path.drive "//a/",       "\\\\A\\")
+      eq(path.drive "//a/b",      "\\\\A\\B")
+      eq(path.drive "//a/b/a/b",  "\\\\A\\B")
+      eq(path.drive "//?/a",      "\\\\?\\")
+      eq(path.drive "//?//a",     "\\\\?\\")
+      eq(path.drive "//?///a/",   "\\\\?\\")
+      eq(path.drive "//?///a/b",  "\\\\?\\")
+      eq(path.drive "//?///a/b/", "\\\\?\\")
+      eq(path.drive "//?/c:",     "\\\\?\\C:")
+      eq(path.drive "//?/c:/",    "\\\\?\\C:")
+      eq(path.drive "//?/cd:/",   "\\\\?\\")
 
-test "rel" {
-   windows = function()
-      eq(path.rel("", ""), [[.\]])
-      eq(path.rel("a", "a"), [[.\]])
-      eq(path.rel("a", "b"), [[..\a]])
-      eq(path.rel("a/b/ccc", "a/b/cccc/"), [[..\ccc]])
-      -- eq(path.rel("a", path.abs"b"), [[..\a]])
-      eq(path.rel("a/b/c/d", "a/b/e/f"), [[..\..\c\d]])
-      eq(path.rel("c:a", "c:b"), [[C:..\a]])
-      eq(path.rel("c:a", "d:b"), [[C:a]])
-      eq(path.rel("c:/a", "d:b"), [[C:\a]])
-      assert(fs.chdir "c:/")
-      eq(path.rel("c:/a", path.abs"c:b"), [[C:..\a]])
-   end;
+      eq(path.root "/",         "\\")
+      eq(path.root "c:/",       "\\")
+      eq(path.root "//aaa/bb/", "\\")
+      eq(path.root "aa/bb/",    "")
+      eq(path.root "c:",        "")
+      eq(path.root "c:aa/bb",   "")
+      eq(path.root "///aaa/bb", "\\")
+   else
+      eq("", path.drive "a/b")
+      eq("", path.drive "c:a/b")
+      eq("", path.drive "c:/a/b")
+      eq("", path.drive "cd:/a/b")
+      eq("", path.drive "//a/")
+      eq("", path.drive "//a/b")
+      eq("", path.drive "//a/b/a/b")
+      eq("", path.drive "//?/a")
+      eq("", path.drive "//?//a")
+      eq("", path.drive "//?///a/")
+      eq("", path.drive "//?///a/b")
+      eq("", path.drive "//?///a/b/")
+      eq("", path.drive "//?/c:")
+      eq("", path.drive "//?/c:/")
+      eq("", path.drive "//?/cd:/")
 
-   posix = function()
-      eq(path.rel("a", "b"), [[../a]])
-      --eq(path.rel("a", path.abs"b"), [[..\a]])
-      eq(path.rel("a/b/c/d", "a/b/e/f"), [[../../c/d]])
-      eq(path.rel("c:a", "c:b"), [[../c:a]])
-      eq(path.rel("c:a", "d:b"), [[../c:a]])
-      eq(path.rel("c:/a", "d:b"), [[../c:/a]])
-      --eq(path.rel("c:/a", path.abs"c:b"), [[../c:/a]])
-   end;
-}
+      eq(path.root("/a"), "/")
+      eq(path.root("//a"), "//")
+      eq(path.root("///a"), "/")
 
-test "split" {
-   windows = function()
-      local a, b = path.split ""
-      eq(a, ""); eq(b, "")
-      a, b = path.split "a/b"
-      eq(a, "a/"); eq(b, "b")
-      a, b = path.split "aaa/bbb"
-      eq(a, "aaa/"); eq(b, "bbb")
-      a, b = path.split "/"
-      eq(a, "/"); eq(b, "")
-      a, b = path.split "/a"
-      eq(a, "/"); eq(b, "a")
-      a, b = path.split "a"
-      eq(a, ""); eq(b, "a")
-      a, b = path.split "aaa"
-      eq(a, ""); eq(b, "aaa")
-      a, b = path.split "a/"
-      eq(a, "a/"); eq(b, "")
-      a, b = path.split "//a/b/c"
-      eq(a, "//a/b/"); eq(b, "c")
-      a, b = path.split "//a/b/"
-      eq(a, "//a/b/"); eq(b, "")
-      a, b = path.split "c:"
-      eq(a, "c:"); eq(b, "")
-      a, b = path.split "c:/"
-      eq(a, "c:/"); eq(b, "")
-      a, b = path.split "c:/a"
-      eq(a, "c:/"); eq(b, "a")
-   end;
+      eq(path.root "/",         "/")
+      eq(path.root "c:/",       "")
+      eq(path.root "//aaa/bb/", "//")
+      eq(path.root "aa/bb/",    "")
+      eq(path.root "c:",        "")
+      eq(path.root "c:aa/bb",   "")
+      eq(path.root "///aaa/bb", "/")
+   end
+end
 
-   posix = function()
-      local a, b = path.split ""
-      eq(a, ""); eq(b, "")
-      a, b = path.split "a/b"
-      eq(a, "a/"); eq(b, "b")
-      a, b = path.split "aaa/bbb"
-      eq(a, "aaa/"); eq(b, "bbb")
-      a, b = path.split "/"
-      eq(a, "/"); eq(b, "")
-      a, b = path.split "/a"
-      eq(a, "/"); eq(b, "a")
-      a, b = path.split "a"
-      eq(a, ""); eq(b, "a")
-      a, b = path.split "aaa"
-      eq(a, ""); eq(b, "aaa")
-      a, b = path.split "a/"
-      eq(a, "a/"); eq(b, "")
-      a, b = path.split "//a/b/c"
-      eq(a, "//a/b/"); eq(b, "c")
-      a, b = path.split "//a/b/"
-      eq(a, "//a/b/"); eq(b, "")
-      a, b = path.split "c:"
-      eq(a, ""); eq(b, "c:")
-      a, b = path.split "c:/"
-      eq(a, "c:/"); eq(b, "")
-      a, b = path.split "c:/a"
-      eq(a, "c:/"); eq(b, "a")
-   end;
-}
-
-test "splitdrive" {
-   windows = function()
-      local a, b = path.splitdrive "a/b"
-      eq(a, ""); eq(b, "a/b")
-      a, b = path.splitdrive "c:a/b"
-      eq(a, "c:"); eq(b, "a/b")
-      a, b = path.splitdrive "c:/a/b"
-      eq(a, "c:"); eq(b, "/a/b")
-      a, b = path.splitdrive "cd:/a/b"
-      eq(a, ""); eq(b, "cd:/a/b")
-      a, b = path.splitdrive "//a/"
-      eq(a, ""); eq(b, "//a/")
-      a, b = path.splitdrive "//a/b"
-      eq(a, "//a/b"); eq(b, "")
-      a, b = path.splitdrive "//a/b/a/b"
-      eq(a, "//a/b"); eq(b, "/a/b")
-      a, b = path.splitdrive "//?/a"
-      eq(a, "//?/"); eq(b, "a")
-      a, b = path.splitdrive "//?//a"
-      eq(a, "//?/"); eq(b, "/a")
-      a, b = path.splitdrive "//?///a/"
-      eq(a, "//?/"); eq(b, "//a/")
-      a, b = path.splitdrive "//?///a/b"
-      eq(a, "//?///a/b"); eq(b, "")
-      a, b = path.splitdrive "//?///a/b/"
-      eq(a, "//?///a/b"); eq(b, "/")
-      a, b = path.splitdrive "//?/c:"
-      eq(a, "//?/c:"); eq(b, "")
-      a, b = path.splitdrive "//?/c:/"
-      eq(a, "//?/c:"); eq(b, "/")
-      a, b = path.splitdrive "//?/cd:/"
-      eq(a, "//?/"); eq(b, "cd:/")
-   end;
-
-   posix = function()
-      local a, b = path.splitdrive "a/b"
-      eq(a, ""); eq(b, "a/b")
-      a, b = path.splitdrive "c:a/b"
-      eq(a, ""); eq(b, "c:a/b")
-      a, b = path.splitdrive "c:/a/b"
-      eq(a, ""); eq(b, "c:/a/b")
-      a, b = path.splitdrive "cd:/a/b"
-      eq(a, ""); eq(b, "cd:/a/b")
-      a, b = path.splitdrive "//a/"
-      eq(a, ""); eq(b, "//a/")
-      a, b = path.splitdrive "//a/b"
-      eq(a, ""); eq(b, "//a/b")
-      a, b = path.splitdrive "//a/b/a/b"
-      eq(a, ""); eq(b, "//a/b/a/b")
-      a, b = path.splitdrive "//?/a"
-      eq(a, ""); eq(b, "//?/a")
-      a, b = path.splitdrive "//?//a"
-      eq(a, ""); eq(b, "//?//a")
-      a, b = path.splitdrive "//?///a/"
-      eq(a, ""); eq(b, "//?///a/")
-      a, b = path.splitdrive "//?///a/b"
-      eq(a, ""); eq(b, "//?///a/b")
-      a, b = path.splitdrive "//?///a/b/"
-      eq(a, ""); eq(b, "//?///a/b/")
-      a, b = path.splitdrive "//?/c:"
-      eq(a, ""); eq(b, "//?/c:")
-      a, b = path.splitdrive "//?/c:/"
-      eq(a, ""); eq(b, "//?/c:/")
-      a, b = path.splitdrive "//?/cd:/"
-      eq(a, ""); eq(b, "//?/cd:/")
-   end;
-}
-
-test "expandvars" {
-   windows = function()
-      if fs.getenv "FOO" then
-         fs.setenv("FOO", nil)
+function _G.test_parts()
+   local function collect(s)
+      local t = {}
+      for _, v in path.parts(s) do
+         t[#t+1] = v
       end
-      eq(fs.getenv "FOO", nil)
-      eq(fs.setenv("FOO", "BAR"), "BAR")
-      eq(fs.getenv "FOO", "BAR")
-      eq(fs.expandvars "abc%FOO%abc", "abcBARabc")
-   end;
+      return t
+   end
 
-   posix = function()
-      if fs.getenv "FOO" then
-         fs.setenv("FOO", nil)
-      end
-      eq(fs.getenv "FOO", nil)
-      eq(fs.setenv("FOO", "BAR"), "BAR")
-      eq(fs.getenv "FOO", "BAR")
-      eq(fs.expandvars "abc${FOO}abc", "abcBARabc")
-   end;
-}
+   eq(path.parts("a", "b", "c", "d", 1), "a")
+   eq(path.parts("a/b", "c", "d", 1), "a")
+   eq(path.parts("a/../b", "c", "d", 1), "b")
+   eq(path.parts("a/b/c/d", -1), "d")
+   eq(path.parts("../../a/b/c/d", 1), "..")
+   eq(path.parts("../../a/b/c/d", 2), "..")
+   eq(path.parts("../../a/b/c/d", 3), "a")
+   eq(path.parts("../../a/b/c/d", 6), "d")
+   eq(path.parts("../../a/b/c/d", 7), nil)
+   eq(path.parts("../../a/b/c/d", -7), nil)
+   eq(path.parts("../../a/b/c/d", -6), "..")
+   eq(path.parts("../../a/b/c/d", -5), "..")
+   eq(path.parts("../../a/b/c/d", -4), "a")
+   eq(path.parts("../../a/b/c/d", -1), "d")
 
-test "itercomp" {
-   windows = function()
-      local function collect(s)
-         local t = {}
-         for _, v in path.itercomp(s) do
-            t[#t+1] = v
-         end
-         return t
-      end
+   table_eq(collect("a/b/c/d"), {"a", "b", "c", "d"})
+
+   if info.platform == "windows" then
       table_eq(collect "a/b/c/d",
+               {"a", "b", "c", "d"})
+      table_eq(collect "a/b/c/d/",
                {"a", "b", "c", "d"})
       table_eq(collect "a/b/c/d",
                {"a", "b", "c", "d"})
@@ -397,30 +335,36 @@ test "itercomp" {
                {"\\", "aa", "bb", "cc", "dd"})
       table_eq(collect "/a/b/c/d",
                {"\\", "a", "b", "c", "d"})
+      table_eq(collect "/a/b/c/d/",
+               {"\\", "a", "b", "c", "d"})
       table_eq(collect "c:/aa/bb/cc/dd",
-               {"C:", "\\", "aa", "bb", "cc", "dd"})
+               {"C:\\", "aa", "bb", "cc", "dd"})
       table_eq(collect "c:/a/b/c/d",
-               {"C:", "\\", "a", "b", "c", "d"})
+               {"C:\\", "a", "b", "c", "d"})
+      table_eq(collect "c:/a/b/c/d/",
+               {"C:\\", "a", "b", "c", "d"})
       table_eq(collect "c:aa/bb/cc/dd",
                {"C:", "aa", "bb", "cc", "dd"})
       table_eq(collect "c:a/b/c/d",
                {"C:", "a", "b", "c", "d"})
+      table_eq(collect "c:a/b/c/d/",
+               {"C:", "a", "b", "c", "d"})
       table_eq(collect "//aa/bb/aa/bb/cc/dd",
-               {[[\\AA\BB]],
-               "\\", "aa", "bb", "cc", "dd"})
+               {[[\\AA\BB\]], "aa", "bb", "cc", "dd"})
       table_eq(collect "//a/b/a/b/c/d",
-               {[[\\A\B]],
-               "\\", "a", "b", "c", "d"})
-   end;
-
-   posix = function()
-      local function collect(s)
-         local t = {}
-         for _, v in path.itercomp(s) do
-            t[#t+1] = v
-         end
-         return t
-      end
+               {[[\\A\B\]], "a", "b", "c", "d"})
+      table_eq(collect "//a/b/a/b/c/d/",
+               {[[\\A\B\]], "a", "b", "c", "d"})
+      table_eq(collect "c:/",
+               {[[C:\]]})
+      table_eq(collect "c:",
+               {[[C:]]})
+      table_eq(collect "//a/b/",
+               {[[\\A\B\]]})
+      table_eq(collect "//a/b",
+               {[[\\A\B\]]})
+   else
+      table_eq(collect("/a/b/c/d"), {"/", "a", "b", "c", "d"})
       table_eq(collect "aa/bb/cc/dd",
                {"aa", "bb", "cc", "dd"})
       table_eq(collect "/aa/bb/cc/dd",
@@ -430,59 +374,510 @@ test "itercomp" {
       table_eq(collect "c:aa/bb/cc/dd",
                { "c:aa", "bb", "cc", "dd"})
       table_eq(collect "//aa/bb/aa/bb/cc/dd",
-               { "/", "aa", "bb", "aa", "bb", "cc", "dd"})
-   end;
-}
-
-function _G.test_splitext()
-   local a, b = path.splitext "a/b"
-   eq(a, "a/b"); eq(b, "")
-   a, b = path.splitext "a/b.c"
-   eq(a, "a/b"); eq(b, ".c")
-   a, b = path.splitext "a/b.c.d"
-   eq(a, "a/b.c"); eq(b, ".d")
-   a, b = path.splitext "a.b/c"
-   eq(a, "a.b/c"); eq(b, "")
-   a, b = path.splitext "a.b/.c"
-   eq(a, "a.b/"); eq(b, ".c")
-   a, b = path.splitext "a.b/.c.d"
-   eq(a, "a.b/.c"); eq(b, ".d")
-end
-
-function _G.test_trim()
-   local s = "/a/b/c/d/"
-   local d = {
-      "/a/b/c/d",
-      "/a/b/c",
-      "/a/b",
-      "/a",
-      "/"
-   }
-   local i = 1
-   while s ~= "/" do
-      s = path.trim((path.split(s)))
-      eq(s, d[i])
-      i = i + 1
+               { "//", "aa", "bb", "aa", "bb", "cc", "dd"})
    end
 end
+
+function _G.test_parentname()
+   local function t(s, p, n)
+      eq(path.parent(s), p)
+      eq(path.name(s), n)
+   end
+   if info.platform == "windows" then
+      local p = path.parent
+      local s = 'z:a/b/c'
+      eq(p(s),          'Z:a\\b')
+      eq(p(p(s)),       'Z:a')
+      eq(p(p(p(s))),    'Z:')
+      eq(p(p(p(p(s)))), 'Z:..')
+      s = 'z:/a/b/c'
+      eq(p(s),          'Z:\\a\\b')
+      eq(p(p(s)),       'Z:\\a')
+      eq(p(p(p(s))),    'Z:\\')
+      eq(p(p(p(p(s)))), 'Z:\\')
+      s = '//a/b/c/d'
+      eq(p(s),          '\\\\A\\B\\c')
+      eq(p(p(s)),       '\\\\A\\B\\')
+      eq(p(p(p(s))),    '\\\\A\\B\\')
+
+      eq(path.parent(".."), "..\\..")
+      eq(path.parent("../"), "..\\..")
+      eq(path.parent("../foo/bar"), "..\\foo")
+
+      eq(path.name 'c:', '')
+      eq(path.name 'c:/', '')
+      eq(path.name 'c:a/b', 'b')
+      eq(path.name 'c:/a/b', 'b')
+      eq(path.name 'c:a/b.py', 'b.py')
+      eq(path.name 'c:/a/b.py', 'b.py')
+      eq(path.name '//My.py/Share.php', '')
+      eq(path.name '//My.py/Share.php/a/b', 'b')
+
+      t("",        "..",         "")
+      t("a/b",     "a",          "b")
+      t("aaa/bbb", "aaa",        "bbb")
+      t("/",       "\\",         "")
+      t("/a",      "\\",         "a")
+      t("a",       ".",          "a")
+      t("aaa",     ".",          "aaa")
+      t("a/",      ".",          "a")
+      t("//a/b/c", "\\\\A\\B\\", "c")
+      t("//a/b/",  "\\\\A\\B\\", "")
+      t("c:",      "C:..",       "")
+      t("c:/",     "C:\\",       "")
+      t("c:/a",    "C:\\",       "a")
+   else
+      t("",        "..",    "")
+      t("a/b",     "a",     "b")
+      t("a",       ".",     "a")
+      t("a/",      ".",     "a")
+      t("aaa",     ".",     "aaa")
+      t("aaa/",    ".",     "aaa")
+      t("aaa/bbb", "aaa",   "bbb")
+      t("/",       "/",     "")
+      t("/a",      "/",     "a")
+      t("/a/",     "/",     "a")
+      t("//a/b/c", "//a/b", "c")
+      t("//a/b",   "//a",   "b")
+      t("c:",      ".",     "c:")
+      t("c:/",     ".",     "c:")
+      t("c:/a",    "c:",    "a")
+      t("c:/a/",   "c:",    "a")
+   end
+
+   eq(path.parent("abc/"), ".")
+   eq(path.parent(""), "..")
+   eq(path.parent("."), "..")
+   eq(path.parent("./"), "..")
+   eq(path.parent("../foo"), "..")
+   eq(path.name(".."), "..")
+   eq(path.name(""), "")
+   eq(path.name("/"), "")
+   eq(path.name("/abc"), "abc")
+   eq(path.name("/abc/"), "abc")
+   eq(path.name("abc/"), "abc")
+end
+
+function _G.test_stem()
+   if info.platform == "windows" then
+      eq(path.stem'c:', '')
+      eq(path.stem'c:.', '')
+      --eq(path.stem'c:..', '..')
+      eq(path.stem'c:/', '')
+      eq(path.stem'c:a/b', 'b')
+      eq(path.stem'c:a/b.py', 'b')
+      eq(path.stem'c:a/.hgrc', '.hgrc')
+      eq(path.stem'c:a/.hg.rc', '.hg')
+      eq(path.stem'c:a/b.tar.gz', 'b.tar')
+      eq(path.stem'c:a/Some name. Ending with a dot.',
+         'Some name. Ending with a dot.')
+   end
+   eq(path.stem("abc"), "abc")
+   eq(path.stem(".abc"), ".abc")
+   eq(path.stem("abc.exe"), "abc")
+   eq(path.stem(".abc.exe"), ".abc")
+   eq(path.stem("abc.tar.gz"), "abc.tar")
+   eq(path.stem(".abc.tar.gz"), ".abc.tar")
+end
+
+function _G.test_shuffix()
+   local function collect(name)
+      local t = {}
+      for _, ext in path.shuffixes(name) do
+         t[#t+1] = ext
+      end
+      return t
+   end
+
+   if info.platform == "windows" then
+      eq(path.shuffix'c:', '')
+      eq(path.shuffix'c:/', '')
+      eq(path.shuffix'c:a/b', '')
+      eq(path.shuffix'c:/a/b', '')
+      eq(path.shuffix'c:a/b.py', '.py')
+      eq(path.shuffix'c:/a/b.py', '.py')
+      eq(path.shuffix'c:a/.hgrc', '')
+      eq(path.shuffix'c:/a/.hgrc', '')
+      eq(path.shuffix'c:a/.hg.rc', '.rc')
+      eq(path.shuffix'c:/a/.hg.rc', '.rc')
+      eq(path.shuffix'c:a/b.tar.gz', '.gz')
+      eq(path.shuffix'c:/a/b.tar.gz', '.gz')
+      eq(path.shuffix'c:a/Some name. Ending with a dot.', '')
+      eq(path.shuffix'c:/a/Some name. Ending with a dot.', '')
+      eq(path.shuffix'//My.py/Share.php', '')
+      eq(path.shuffix'//My.py/Share.php/a/b', '')
+
+      table_eq(collect 'c:', {})
+      table_eq(collect 'c:/', {})
+      table_eq(collect 'c:a/b', {})
+      table_eq(collect 'c:/a/b', {})
+      table_eq(collect 'c:a/b.py', {'.py'})
+      table_eq(collect 'c:/a/b.py', {'.py'})
+      table_eq(collect 'c:a/.hgrc', {})
+      table_eq(collect 'c:/a/.hgrc', {})
+      table_eq(collect 'c:a/.hg.rc', {'.rc'})
+      table_eq(collect 'c:/a/.hg.rc', {'.rc'})
+      table_eq(collect 'c:a/b.tar.gz', {'.tar', '.gz'})
+      table_eq(collect 'c:/a/b.tar.gz', {'.tar', '.gz'})
+      table_eq(collect '//My.py/Share.php', {})
+      table_eq(collect '//My.py/Share.php/a/b', {})
+      table_eq(collect 'c:a/Some name. Ending with a dot.', {})
+      table_eq(collect 'c:/a/Some name. Ending with a dot.', {})
+   end
+   eq(path.shuffix "a/b", "")
+   eq(path.shuffix "a/b.c", ".c")
+   eq(path.shuffix "a/b.c.d", ".d")
+   eq(path.shuffix "a.b/c", "")
+   eq(path.shuffix "a.b/.c", "")
+   eq(path.shuffix "a.b/c.d", ".d")
+   eq(path.shuffix "a.b/", ".b")
+
+   eq(path.shuffix("abc"), "")
+   eq(path.shuffix(".abc"), "")
+   eq(path.shuffix("abc.exe"), ".exe")
+   eq(path.shuffix(".abc.exe"), ".exe")
+   eq(path.shuffix("abc.tar.gz"), ".gz")
+   eq(path.shuffix(".abc.tar.gz"), ".gz")
+
+   table_eq(collect "", {})
+   table_eq(collect "abc", {})
+   table_eq(collect ".abc", {})
+   table_eq(collect "abc.def.zzz", {".def", ".zzz"})
+   table_eq(collect "abc....zzz", {".", ".", ".", ".zzz"})
+end
+
+function _G.test_fnmatch()
+   is_true(path.fnmatch("abc", "a[b]c"))
+   is_true(path.fnmatch("abc", "*a*b*c*"))
+   is_true(not path.fnmatch("abc", "a[!b]c"))
+
+   local function check(a, b, r, f)
+      local ok = (r == nil and true or r)
+      eq(not not (f or path.fnmatch)(a, b), ok)
+   end
+
+   check('abc', 'abc')
+   check('abc', '?*?')
+   check('abc', '???*')
+   check('abc', '*???')
+   check('abc', '???')
+   check('abc', '*')
+   check('abc', 'ab[cd]')
+   check('abc', 'ab[!de]')
+   check('abc', 'ab[de]', false)
+   check('a',   '??',     false)
+   check('a',   'b',      false)
+
+   check('\\', '[\\]')
+   check('a',  '[!\\]')
+   check('\\', '[!\\]', false)
+
+   check('foo\nbar',   'foo*')
+   check('foo\nbar\n', 'foo*')
+   check('\nfoo',      'foo*', false)
+   check('\n',         '*')
+
+   -- test slow
+   check(('a'):rep(50), '*a*a*a*a*a*a*a*a*a*a')
+   -- The next "takes forever" if the regexp translation is
+   -- straightforward.  See bpo-40480.
+   check(('a'):rep(50)..'b', '*a*a*a*a*a*a*a*a*a*a', false)
+
+   -- test edge case
+   check('[', '[[]')
+   check('&', '[a&&b]')
+   check('|', '[a||b]')
+   check('~', '[a~~b]')
+   check(',', '[a-z+--A-Z]')
+   check('.', '[a-z--/A-Z]')
+
+   -- test case
+   if info.platform == "windows" then
+      check('abc', 'abc', true)
+      check('AbC', 'abc', true)
+      check('abc', 'AbC', true)
+      check('AbC', 'AbC', true)
+      check('usr/bin',  'usr/bin',  true)
+      check('usr\\bin', 'usr/bin',  true)
+      check('usr/bin',  'usr\\bin', true)
+      check('usr\\bin', 'usr\\bin', true)
+   else
+      check('abc', 'abc', true)
+      check('AbC', 'abc', false)
+      check('abc', 'AbC', false)
+      check('AbC', 'AbC', true)
+      check('usr/bin',  'usr/bin',  true)
+      check('usr\\bin', 'usr/bin',  false)
+      check('usr/bin',  'usr\\bin', false)
+      check('usr\\bin', 'usr\\bin', true)
+   end
+end
+
+function _G.test_match()
+   local function assert_true(cond)
+      assert(not not cond, cond)
+   end
+   local function assert_false(cond)
+      assert(not cond, cond)
+   end
+   assert_true(path.match("a", ""))
+   assert_false(path.match("a", "."))
+   assert_true(path.match(".", "."))
+   assert_false(path.match('../../a', '../a'))
+
+   -- Simple relative pattern.
+   assert_true(path.match('b.lua', 'b.lua'))
+   assert_true(path.match('a/b.lua', 'b.lua'))
+   assert_true(path.match('/a/b.lua', 'b.lua'))
+   assert_false(path.match('a.lua', 'b.lua'))
+   assert_false(path.match('b/lua', 'b.lua'))
+   assert_false(path.match('/a.lua', 'b.lua'))
+   assert_false(path.match('b.lua/c', 'b.lua'))
+
+   -- Wilcard relative pattern.
+   assert_true(path.match('b.lua', '*.lua'))
+   assert_true(path.match('a/b.lua', '*.lua'))
+   assert_true(path.match('/a/b.lua', '*.lua'))
+   assert_false(path.match('b.pyc', '*.lua'))
+   assert_false(path.match('b./lua', '*.lua'))
+   assert_false(path.match('b.lua/c', '*.lua'))
+
+   -- Multi-part relative pattern.
+   assert_true(path.match('ab/c.lua', 'a*/*.lua'))
+   assert_true(path.match('/d/ab/c.lua', 'a*/*.lua'))
+   assert_false(path.match('a.lua', 'a*/*.lua'))
+   assert_false(path.match('/dab/c.lua', 'a*/*.lua'))
+   assert_false(path.match('ab/c.lua/d', 'a*/*.lua'))
+
+   -- Absolute pattern.
+   assert_true(path.match('/b.lua', '/*.lua'))
+   assert_false(path.match('b.lua', '/*.lua'))
+   assert_false(path.match('a/b.lua', '/*.lua'))
+   assert_false(path.match('/a/b.lua', '/*.lua'))
+
+   -- Multi-part absolute pattern.
+   assert_true(path.match('/a/b.lua', '/a/*.lua'))
+   assert_false(path.match('/ab.lua', '/a/*.lua'))
+   assert_false(path.match('/a/b/c.lua', '/a/*.lua'))
+
+   -- Multi-part glob-style pattern.
+   assert_false(path.match('/a/b/c.lua', '/**/*.lua'))
+   assert_true(path.match('/a/b/c.lua', '/a/**/*.lua'))
+
+   if info.platform == "windows" then
+      assert_false(path.match("C:/foo", "D:/foo"))
+   end
+end
+
+function _G.test_env()
+   if info.platform == "windows" then
+      local long = ("a"):rep(1024)
+      env.set("long", long)
+      eq(env.get "long", long)
+      eq(env.expand "<%long%>", "<"..long..">")
+      if env.get "FOO" then
+         env.set("FOO", nil)
+      end
+      eq(env.get "FOO", nil)
+      eq(env.set("FOO", "BAR"), "BAR")
+      eq(env.get "FOO", "BAR")
+      eq(env.expand "abc%FOO%abc", "abcBARabc")
+   else
+      if env.get "FOO" then
+         env.set("FOO", nil)
+      end
+      eq(env.get "FOO", nil)
+      eq(env.set("FOO", "BAR"), "BAR")
+      eq(env.get "FOO", "BAR")
+      eq(env.expand "abc${FOO}abc", "abcBARabc")
+   end
+end
+
+function _G.test_abs()
+   if info.platform == "windows" then
+      assert(fs.touch "test")
+      assert(fs.touch("test", nil, nil))
+      assert(fs.touch("test", os.time()))
+      assert(fs.chdir "C:/")
+      eq(path(fs.getcwd(), "Windows"), path.abs "Windows")
+      eq(path(fs.getcwd(), "Windows"), path.resolve "Windows")
+   else
+      assert(fs.touch "test")
+      assert(fs.touch("test", nil, nil))
+      eq(path(fs.getcwd(), "test"), path.abs "test")
+   end
+end
+
+function _G.test_rel()
+   if info.platform == "windows" then
+      eq(path.rel("/aaa/bbb", "/aaa/bbb/ccc"), '..')
+      eq(path.rel("/aaa/bbb/", "/aaa/bbb/ccc"), '..')
+      eq(path.rel("/aaa/bbb/ccc", "/aaaabbb"), '..\\aaa\\bbb\\ccc')
+      eq(path.rel("/aaaabbb/ccc", "/aaa/bbb"), '..\\..\\aaaabbb\\ccc')
+      eq(path.rel("a"), 'a')
+      eq(path.rel(path.abs("a/")), 'a\\')
+      eq(path.rel(path.abs("a")), 'a')
+      eq(path.rel("a/b"), 'a\\b')
+      eq(path.rel("../a/b"), '..\\a\\b')
+      eq(path.rel("a", "b"), '..\\a')
+      eq(path.rel("a", "b/"), '..\\a')
+      eq(path.rel("a/", "b/"), '..\\a\\')
+      eq(path.rel("a/", "b/"), '..\\a\\')
+      eq(path.rel("a", "b/c"), '..\\..\\a')
+      eq(path.rel("c:/foo/bar/bat", "c:/x/y"), '..\\..\\foo\\bar\\bat')
+      eq(path.rel("//conky/mountpoint/a", "//conky/mountpoint/b/c"), '..\\..\\a')
+      eq(path.rel("a", "a"), '.')
+      eq(path.rel("/foo/bar/bat", "/x/y/z"), '..\\..\\..\\foo\\bar\\bat')
+      eq(path.rel("/foo/bar/bat", "/foo/bar"), 'bat')
+      eq(path.rel("/foo/bar/bat", "/"), 'foo\\bar\\bat')
+      eq(path.rel("/", "/foo/bar/bat"), '..\\..\\..')
+      eq(path.rel("/foo/bar/bat", "/x"), '..\\foo\\bar\\bat')
+      eq(path.rel("/x", "/foo/bar/bat"), '..\\..\\..\\x')
+      eq(path.rel("/", "/"), '.')
+      eq(path.rel("/a", "/a"), '.')
+      eq(path.rel("/a/b", "/a/b"), '.')
+      eq(path.rel("c:/foo", "C:/FOO"), '.')
+      eq(path.rel("a/b/ccc", "a/b/cccc/"), [[..\ccc]])
+      eq(path.rel("a", path.abs"b"), [[..\a]])
+      eq(path.rel("a/b/c/d", "a/b/e/f"), [[..\..\c\d]])
+      eq(path.rel("c:a", "c:b"), [[..\a]])
+      eq(path.rel("c:a", "d:b"), [[C:a]])
+      eq(path.rel("c:/a", "d:b"), [[C:\a]])
+      local cwd = fs.getcwd()
+      assert(fs.chdir "c:/")
+      eq(path.rel("c:/a", path.abs"c:b"), [[..\a]])
+      assert(fs.chdir(cwd))
+
+      eq(path.rel("a"), 'a')
+      eq(path.rel(path.abs("a")), 'a')
+      eq(path.rel("a/b"), 'a\\b')
+      eq(path.rel("../a/b"), '..\\a\\b')
+      eq(path.rel("a", "b"), '..\\a')
+      eq(path.rel("a", "b/c"), '..\\..\\a')
+      eq(path.rel("c:/foo/bar/bat", "c:/x/y"), '..\\..\\foo\\bar\\bat')
+      eq(path.rel("//conky/mountpoint/a", "//conky/mountpoint/b/c"), '..\\..\\a')
+      eq(path.rel("a", "a"), '.')
+      eq(path.rel("/foo/bar/bat", "/x/y/z"), '..\\..\\..\\foo\\bar\\bat')
+      eq(path.rel("/foo/bar/bat", "/foo/bar"), 'bat')
+      eq(path.rel("/foo/bar/bat", "/"), 'foo\\bar\\bat')
+      eq(path.rel("/", "/foo/bar/bat"), '..\\..\\..')
+      eq(path.rel("/foo/bar/bat", "/x"), '..\\foo\\bar\\bat')
+      eq(path.rel("/x", "/foo/bar/bat"), '..\\..\\..\\x')
+      eq(path.rel("/", "/"), '.')
+      eq(path.rel("/a", "/a"), '.')
+      eq(path.rel("/a/b", "/a/b"), '.')
+      eq(path.rel("c:/foo", "C:/FOO"), '.')
+      eq(path.rel("a/b/ccc", "a/b/cccc/"), [[..\ccc]])
+      -- eq(path.rel("a", path.abs"b"), [[..\a]])
+      eq(path.rel("a/b/c/d", "a/b/e/f"), [[..\..\c\d]])
+      eq(path.rel("c:a", "c:b"), [[..\a]])
+      eq(path.rel("c:a", "d:b"), [[C:a]])
+      eq(path.rel("c:/a", "d:b"), [[C:\a]])
+      assert(fs.chdir "c:/")
+      eq(path.rel("c:/a", path.abs"c:b"), [[..\a]])
+   else
+      eq(path.rel("/aaa/bbb", "/aaa/bbb/ccc"), '..')
+      eq(path.rel("/aaa/bbb/", "/aaa/bbb/ccc"), '..')
+      eq(path.rel("/aaa/bbb/ccc", "/aaaabbb"), '../aaa/bbb/ccc')
+      eq(path.rel("/aaaabbb/ccc", "/aaa/bbb"), '../../aaaabbb/ccc')
+      eq(path.rel("a"), 'a')
+      eq(path.rel(path.abs("a/")), 'a/')
+      eq(path.rel(path.abs("a")), 'a')
+      eq(path.rel("a/b"), 'a/b')
+      eq(path.rel("../a/b"), '../a/b')
+      eq(path.rel("a", "b"), '../a')
+      eq(path.rel("a", "b/"), '../a')
+      eq(path.rel("a/", "b/"), '../a/')
+      eq(path.rel("a/", "b/"), '../a/')
+      eq(path.rel("a", "b/c"), '../../a')
+      eq(path.rel("c:/foo/bar/bat", "c:/x/y"), '../../foo/bar/bat')
+      eq(path.rel("//conky/mountpoint/a", "//conky/mountpoint/b/c"), '../../a')
+      eq(path.rel("a", "a"), '.')
+      eq(path.rel("/foo/bar/bat", "/x/y/z"), '../../../foo/bar/bat')
+      eq(path.rel("/foo/bar/bat", "/foo/bar"), 'bat')
+      eq(path.rel("/foo/bar/bat", "/"), 'foo/bar/bat')
+      eq(path.rel("/", "/foo/bar/bat"), '../../..')
+      eq(path.rel("/foo/bar/bat", "/x"), '../foo/bar/bat')
+      eq(path.rel("/x", "/foo/bar/bat"), '../../../x')
+      eq(path.rel("/", "/"), '.')
+      eq(path.rel("/a", "/a"), '.')
+      eq(path.rel("/a/b", "/a/b"), '.')
+      eq(path.rel("a/b/ccc", "a/b/cccc/"), '../ccc')
+      eq(path.rel("a", path.abs"b"), '../a')
+      eq(path.rel("a/b/c/d", "a/b/e/f"), '../../c/d')
+      local cwd = fs.getcwd()
+      assert(fs.chdir "/")
+      eq(path.rel("/a", path.abs"b"), '../a')
+      assert(fs.chdir(cwd))
+
+      eq(path.rel("a", "b"), [[../a]])
+      --eq(path.rel("a", path.abs"b"), [[..\a]])
+      eq(path.rel("a/b/c/d", "a/b/e/f"), [[../../c/d]])
+      eq(path.rel("c:a", "c:b"), [[../c:a]])
+      eq(path.rel("c:a", "d:b"), [[../c:a]])
+      eq(path.rel("c:/a", "d:b"), [[../c:/a]])
+      --eq(path.rel("c:/a", path.abs"c:b"), [[../c:/a]])
+   end
+end
+in_tmpdir "test_rel"
+
+function _G.test_makedirs()
+   if info.platform == "windows" then
+      local long = "//?/"..("a"):rep(1024)
+      fail(".-chdir:.*:%(errno%=206%).*",
+         function() assert(fs.chdir(long)) end)
+      fail(".-makedirs:.*:%(errno%=2%).*",
+         function() assert(fs.makedirs(long)) end)
+      fail(".-mkdir:.*:%(errno%=2%).*",
+         function() assert(fs.mkdir(long)) end)
+      long = path(("//?/%s/%s/%s/%s"):format(
+         path.cwd(), ("a"):rep(100), ("b"):rep(100), ("c"):rep(100)))
+      assert(fs.makedirs(long))
+      eq(path.abs(long), long)
+      assert(#path.resolve(long) >= #long)
+   end
+   assert(fs.makedirs "a/b/c/d/e/f/g/h/i/j/k/l/m/n")
+   assert(path.resolve "a")
+   assert(fs.mkdir "a")
+   fail(".-rmdir:a.*", assert, fs.rmdir("a"))
+   assert(fs.mkdir "b")
+   eq(fs.rmdir "b", "b")
+   eq(fs.isdir "a", "a")
+   assert(fs.removedirs "a")
+   assert(fs.makedirs("c", "a"))
+   assert(fs.touch "c")
+   assert(fs.touch "c/a/b")
+   assert(fs.unlockdirs "c")
+   assert(fs.ctime "c")
+   assert(fs.mtime "c")
+   assert(fs.atime "c")
+   assert(fs.makedirs("c", "a", "b"))
+   fail(".-makedirs.*", assert, fs.makedirs("c/a/b/c"))
+   assert(fs.remove "c/a/b")
+   assert(fs.makedirs "c/a/b/c")
+   io.output "txtfile"
+   io.write "helloworld"
+   io.close()
+   eq(fs.size "txtfile", 10)
+   assert(fs.copy("txtfile", "txtfile2"))
+   assert(fs.rename("txtfile2", "txtfile3"))
+end
+in_tmpdir "test_makedirs"
 
 function _G.test_dir()
-   local cwd = fs.getcwd()
-   local dir = assert(fs.tmpdir())
-   assert(fs.chdir(dir))
-   local old = { "a", "b", "c", "d", "e" }
-   maketree(old)
-   local t = {}
-   for fn in fs.dir() do
-      t[#t+1] = fn
-   end
-   table_eq(t, old)
    maketree(dir_table)
+   for f, s in fs.dir "test/test1/file1" do
+      if info.platform == "windows" then
+         eq(f, "test\\test1\\file1")
+      else
+         eq(f, "test/test1/file1")
+      end
+      eq(s, "file")
+   end
    local function check_dir(d)
-      assert(fs.chdir(assert(d.name)))
       local files = {}
       local dirs = {}
-      for fn, ft in fs.dir '.' do
+      for fn, ft in fs.dir() do
          assert(fn ~= '.' and fn ~= '..')
          if ft == 'dir' or (ft == nil and fs.type(fn) == "dir") then
             assert(not dirs[fn])
@@ -492,62 +887,64 @@ function _G.test_dir()
             files[fn] = true
          end
       end
-      for _, v in ipairs(d) do
-         if type(v) == "string" then
+      for k, v in pairs(d) do
+         if type(k) == "string" then
+            assert(dirs[k], k)
+            dirs[k] = nil
+            assert(fs.chdir(assert(k)))
+            check_dir(v)
+            assert(fs.chdir "..")
+         else
             assert(files[v], v)
             files[v] = nil
-         else
-            assert(dirs[v.name], v.name)
-            dirs[v.name] = nil
-            check_dir(v)
          end
       end
       assert(not next(files), next(files))
       assert(not next(dirs), next(dirs))
-      assert(fs.chdir "..")
    end
    check_dir(dir_table)
-   fs.chdir(cwd)
-end
+   local function test_count(n, ...)
+      local count = 0
+      for _ in ... do
+         count = count + 1
+      end
+      eq(count, n)
+   end
+   local function test_table(r, ...)
+      local t = {}
+      for n in ... do
+         t[#t+1] = n
+      end
+      table_eq(t, r)
+   end
+   maketree(glob_tree)
+   assert(fs.chdir "test_glob")
+   test_table({'case_1', 'case_2'}, fs.dir())
+   for _, state in fs.dir() do
+      if state == "dir" then break end
+   end
+   if info.platform == 'windows' then
+      test_table({'.\\case_1', '.\\case_2'}, fs.dir'.')
+   else
+      test_table({'./case_1', './case_2'}, fs.dir'.')
+   end
 
-function _G.test_makedirs()
-   local cwd = fs.getcwd()
-   local dir = assert(fs.tmpdir())
-   assert(fs.chdir(dir))
-   assert(fs.makedirs "a/b/c/d/e/f/g/h/i/j/k/l/m/n")
-   assert(fs.mkdir "a")
-   fail(".-rmdir:a.*", assert, fs.rmdir("a"))
-   assert(fs.mkdir "b")
-   eq(fs.rmdir "b", "b")
-   eq(fs.type "a", "dir")
-   assert(fs.makedirs("c", "a"))
-   assert(fs.touch "c")
-   assert(fs.touch "c/a/b")
-   assert(fs.ftime "c")
-   assert(fs.cmpftime("a", "c"))
-   assert(fs.makedirs("c", "a", "b"))
-   assert(fs.removedirs "a")
-   fail(".-makedirs.*", assert, fs.makedirs("c/a/b/c"))
-   assert(fs.remove "c/a/b")
-   assert(fs.makedirs "c/a/b/c")
-   io.output "txtfile"
-   io.write "helloworld"
-   io.close()
-   eq(fs.fsize "txtfile", 10)
-   assert(fs.copy("txtfile", "txtfile2"))
-   assert(fs.rename("txtfile2", "txtfile3"))
-   fs.chdir(cwd)
-end
+   test_count(33, fs.scandir())
+   test_count(8, fs.scandir(1))
 
-function _G.test_fnmatch()
-   is_true(fs.fnmatch("abc", "a[b]c"))
-   is_true(fs.fnmatch("abc", "*a*b*c*"))
-   is_true(not fs.fnmatch("abc", "a[!b]c"))
+   assert(fs.mkdir "../test_deep")
+   assert(fs.chdir "../test_deep")
+   local old = { "a", "b", "c", "d", "e" }
+   maketree(old)
+   local t = {}
+   for fn in fs.dir() do
+      t[#t+1] = fn
+   end
+   table_eq(t, old)
 end
+in_tmpdir "test_dir"
 
 function _G.test_walk()
-   local cwd = fs.getcwd()
-   assert(fs.tmpdir())
    assert(fs.removedirs "test")
    maketree(dir_table)
    local map = {}
@@ -556,7 +953,7 @@ function _G.test_walk()
       map[v] = true
    end
    map['test'..info.sep] = nil
-   for p, state in fs.walk "test" do
+   for p, state in fs.scandir "test" do
       if state == 'out' then
          assert(inlist[p])
          inlist[p] = nil
@@ -578,11 +975,113 @@ function _G.test_walk()
    -- for _, f in ipairs(fs.glob("*", "test")) do
    --    print(f)
    -- end
-   eq(#assert(fs.glob("*f[i]le*", "test")), 9)
+   local cnt = 0
+   local gmap = {
+      [path "test/test1/file1"] = true,
+      [path "test/test1/file2"] = true,
+      [path "test/test1/file3"] = true,
+      [path "test/test2/file1"] = true,
+      [path "test/test2/file2"] = true,
+      [path "test/test2/file3"] = true,
+      [path "test/test3/file1"] = true,
+      [path "test/test3/file2"] = true,
+      [path "test/test3/file3"] = true,
+   }
+   for f, s in fs.glob "test/**/*f[i]le*" do
+      is_true(gmap[f]); gmap[f] = nil
+      eq(s, "file")
+      cnt = cnt + 1
+   end
+   eq(cnt, 9)
    assert(fs.removedirs "test")
    assert(not fs.exists "test")
-   fs.chdir(cwd)
 end
+in_tmpdir "test_walk"
+
+function _G.test_attr()
+   maketree(dir_table)
+   assert(fs.isdir "test")
+   assert(not fs.isdir "-not-exists-")
+   assert(fs.isdir "test/test1")
+   assert(fs.isdir("test", "test1"))
+   assert(not fs.isdir("test", "test1", "file1"))
+   assert(fs.isfile("test", "test1", "file1"))
+   assert(not fs.isfile "-not-exists-")
+   assert(not fs.ismount "test")
+   assert(not fs.ismount "-not-exists-")
+   assert(not fs.isfile "-not-exists-")
+   assert(not fs.islink "test")
+   assert(not fs.islink "-not-exists-")
+
+   if info.platform == "windows" then
+      fail(".-size:%-not%-exists%-:%(errno%=2%).*",
+         function() assert(fs.size "-not-exists-") end)
+      fail(".-remove:%-not%-exists%-:%(errno%=2%).*",
+         function() assert(fs.remove "-not-exists-") end)
+      fail(".-rename::%(errno%=2%).*",
+         function() assert(fs.rename("-not-exists-", "")) end)
+      fail(".-copy::%(errno%=2%).*",
+         function() assert(fs.copy("-not-exists-", "")) end)
+      fail(".-open:%-not%-exists%-:%(errno%=2%).*",
+         function() assert(path.resolve("-not-exists-")) end)
+      assert(fs.ismount("//foo/bar"))
+      assert(fs.ismount("//foo/bar/"))
+      assert(fs.ismount("C:/"))
+      assert(not fs.ismount("C:"))
+      assert(not fs.ismount("//?/C:"))
+      assert(fs.ismount("//?/C:/"))
+      assert(fs.ismount("//./"))
+   end
+end
+in_tmpdir "test_attr"
+
+function _G.test_glob()
+   local function test_count(n, ...)
+      local count = 0
+      for _ in ... do
+         count = count + 1
+      end
+      eq(count, n)
+   end
+   maketree(glob_tree)
+   test_count(0, fs.glob())
+   test_count(0, fs.glob "")
+   test_count(0, fs.glob "**")
+   test_count(0, fs.glob "test_glob/case_1/**/a/a/a/b")
+   test_count(1, fs.glob "test_glob/case_2/**/a/a/a/b")
+   test_count(2, fs.glob "test_glob/**/a/b")
+   test_count(2, fs.glob "test_glob/**/a/a/**/a/b")
+   test_count(10, fs.glob "test_glob/case_1/**/a/")
+   test_count(31, fs.glob "test_glob/*")
+
+   -- print(("="):rep(78))
+   -- for f, type in fs.glob "**/*" do
+   --    print(">>", f, type)
+   -- end
+   -- print(("="):rep(78))
+   -- for f, type in fs.glob "**/*.so" do
+   --    print(">>", f, type)
+   -- end
+   -- print(("="):rep(78))
+   -- for f, type in fs.glob "*.so.*/**/*.xx" do
+   --    print(">>", f, type)
+   -- end
+   -- print(("="):rep(78))
+   -- for f, type in fs.glob "**/Contents/**/*.so" do
+   --    print(">>", f, type)
+   -- end
+   -- print(("="):rep(78))
+   -- print("**/Contents/**/DWARF/*")
+   -- for f, type in fs.glob "**/Contents/**/DWARF/*" do
+   --    print(">>", f, type)
+   -- end
+   -- print(("="):rep(78))
+   -- for f, type in fs.glob "*.so.*/Contents/**/DWARF/*" do
+   --    print(">>", f, type)
+   -- end
+   -- print(("="):rep(78))
+end
+in_tmpdir "test_glob"
 
 os.exit(unit.LuaUnit.run(), true)
 
