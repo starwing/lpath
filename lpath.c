@@ -9,12 +9,9 @@
 
 /* compatible */
 
-#ifndef LUA_OK
-# define LUA_OK              0
-# define lua_rawlen          lua_objlen
-# define luaL_newlib(L,l)    (lua_newtable(L), luaL_register(L,NULL,l))
-# define lua_getuservalue    lua_getfenv
-# define lua_setuservalue    lua_setfenv
+#if LUA_VERSION_NUM < 502
+# ifndef LUA_OK /* not LuaJIT 2.1 */
+#   define luaL_newlib(L,l)    (lua_newtable(L), luaL_register(L,NULL,l))
 
 static lua_Integer lua_tointegerx(lua_State *L, int idx, int *pisint) {
     *pisint = lua_type(L, idx) == LUA_TNUMBER;
@@ -33,7 +30,13 @@ static void *luaL_testudata(lua_State *L, int ud, const char *tname) {
     }
     return NULL;
 }
-#endif
+# endif /* not LuaJIT 2.1 */
+
+# define LUA_OK              0
+# define lua_rawlen          lua_objlen
+# define lua_getuservalue    lua_getfenv
+# define lua_setuservalue    lua_setfenv
+#endif /* Lua 5.1 */
 
 #if LUA_VERSION_NUM >= 502
 # define lua52_pushstring lua_pushstring
@@ -2092,6 +2095,6 @@ LUAMOD_API int luaopen_path_info(lua_State *L) {
 /* cc: flags+='-ggdb -Wextra -Wno-cast-function-type --coverage' run='lua tt.lua'
  * unixcc: flags+='-O3 -shared -fPIC' output='path.so'
  * maccc: flags+='-shared -undefined dynamic_lookup' output='path.so'
- * win32cc: lua='Lua51' flags+='-ggdb -mdll -DLUA_BUILD_AS_DLL -IC:/Devel/$lua/include'
+ * win32cc: lua='Lua54' flags+='-ggdb -mdll -DLUA_BUILD_AS_DLL -IC:/Devel/$lua/include'
  * win32cc: libs+='-L C:/Devel/$lua/lib -l$lua' output='path.dll' */
 
