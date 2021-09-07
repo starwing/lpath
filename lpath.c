@@ -1999,7 +1999,8 @@ static int lpL_libcall(lua_State *L) {
 
 LUAMOD_API int luaopen_path(lua_State *L) {
     luaL_Reg libs[] = {
-        { "cwd", lpL_getcwd },
+        { "cwd", lpL_getcwd  },
+        { "bin", lpL_binpath },
 #define ENTRY(n) { #n, lpL_##n }
         ENTRY(ansi),
         ENTRY(utf8),
@@ -2030,6 +2031,7 @@ LUAMOD_API int luaopen_path(lua_State *L) {
 
 LUAMOD_API int luaopen_path_fs(lua_State *L) {
     luaL_Reg libs[] = {
+        { "realpath", lpL_resolve },
 #define ENTRY(n) { #n, lpL_##n }
         ENTRY(dir),
         ENTRY(scandir),

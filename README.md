@@ -1,16 +1,94 @@
 lpath - Path utils for Lua
 ==========================
-[![Build Status](https://travis-ci.org/starwing/lpath.svg?branch=master)](https://travis-ci.org/starwing/lpath)
+[![CI](https://github.com/starwing/lpath/actions/workflows/test.yml/badge.svg)](https://github.com/starwing/lpath/actions/workflows/test.yml)[![Coverage Status](https://coveralls.io/repos/github/starwing/lpath/badge.svg?branch=v0.3)](https://coveralls.io/github/starwing/lpath?branch=v0.3)
 
-`lpath` is a
-[lfs](http://keplerproject.github.io/luafilesystem/)-like Lua module
-to handle path, file system and
-file informations.
+`lpath` is a [lfs](http://keplerproject.github.io/luafilesystem/)-like Lua module to handle path, file system and file informations.
 
-This module is inspired by Python's os.path module. It split into 3
-parts: `path.info`, `path.fs` and `path` itself.
+This module is inspired by Python's `os.path` and `pathlib` module. It split into 4 parts:
+
+- `path`: main module, pathlib style path operations.
+- `path.fs`: fs specific operations, folder walking, file operations, etc.
+- `path.info`: some constants about path literals.
+- `path.env` set/get environment variables, and expand env vars in path.
+
+All routines in this module which accept `...` for parameters means you could pass any count of `string` as arguments. All `string` will joined into a single path, just as pass all arguments to `path(...)`, and pass the resulting path string to the routine.
+
+All routines may returns `nil, error` for error case. if you want raise error to Lua, use `assert(...)` for routines.
+
+## Usage
+
+### `path`
+
+| routine                         | return value | description                                                  |
+| ------------------------------- | ------------ | ------------------------------------------------------------ |
+| `path(...)`                     | `string`     | return joined normalized path string.                        |
+| `path.ansi()`                   | `none`       | set path string encoding to local code page.                 |
+| `path.ansi(number)`             | `none`       | set the code page number for path string encoding.           |
+| `path.ansi(string)`             | `string`     | convert UTF-8 `string` to current code page encoding.        |
+| `path.utf8()`                   | `none`       | set path string encoding to UTF-8.                           |
+| `path.utf8(string)`             | `string`     | convert current code page encoding `string` to UTF-8.        |
+| `path.abs(...)`                 | `string`     | returns the absolute path for joined parts.                  |
+| `path.rel(path[, dir])`         | `string`     | returns  the relation path for dir (default for current work directory). |
+| `path.fnmatch(string, pattern)` | `boolean`    | returns whether the `pattern` matchs the `string`.           |
+| `path.match(path, pattern)`     | `boolean`    | returns as `path.fnmatch`, but using Python path matching rules. |
+| `path.drive(...)`               | `string`     | returns  the drive part of path.                             |
+| `path.root(...)`                | `string`     | returns the root part of path. (`\` on Windows, `/` or `//` on POSIX systems.) |
+| `path.anchor(...)`              | `string`     | same as `path.drive(...) .. path.root(...)`                  |
+| `path.parent(...)`              | `string`     | returns the parent path for path.                            |
+| `path.name(...)`                | `string`     | returns the file name part of the path.                      |
+| `path.stem(...)`                | `string`     | returns the file name part without shuffix name of the path. |
+| `path.shuffix(...)`             | `string`     | returns  the shuffix name of the path.                       |
+| `path.shuffixes(...)`           | `iteraotr`   | returns  a `idx`, `shuffix` iterator to get shuffix names of the path. |
+| `path.parts(...)`               | `iterator`   | returns  a `idx`, `part` iterator to get parts in the path.  |
+| `path.exists(...)`              | `boolean`    | returns whether the path is exists in file system (same as `fs.exists()`) |
+| `path.resolve(...)`             | `string`     | returns the path itself, or the target path if path is a symlink. |
+| `path.cwd()`                    | `string`     | fetch the current working directory path.                    |
+| `path.bin()`                    | `string`     | fetch the current executable file path.                      |
+| `path.isdir(...)`               | `boolean`    | returns whether the path is a directory.                     |
+| `path.islink(...)`              | `boolean`    | returns whether the path is a symlink.                       |
+| `path.isfile(...)`              | `boolean`    | returns whether the path is a regular file.                  |
+| `path.ismount(...)`             | `boolean`    | returns whether the path is a mount point.                   |
+
+### `path.fs`
+
+| routine                           | return value | description                                                  |
+| --------------------------------- | ------------ | ------------------------------------------------------------ |
+| `fs.dir(...)`                     | `iterator`   | returns a iterator `filename, type` to list all child items in path. |
+| `fs.scandir(...[, depth])`        | `iterator`   | same as `fs.dir`, but  walk into sub directories recursively. |
+| `fs.glob(...[, depth])`           | `iterator`   | same as `fs.scandir`, but accepts a pattern for filter the items in directory. |
+| `fs.chdir(...)`                   | `string`     | change current working directory and returns the path, or `nil` for error. |
+| `fs.mkdir(...)`                   | `string`     | create directory.                                            |
+| `fs.rmdir(...)`                   | `string`     | remove empty directory.                                      |
+| `fs.makedirs(...)`                | `string`     | create directory recursively.                                |
+| `fs.remvoedirs(...)`              | `string`     | remove all items in a directory recursively.                 |
+| `fs.unlockdirs(...)`              | `string`     | add write perimission for all files in a directory recursively. |
+| `fs.tmpdir(prefix)`               | `string`     | create a tmpdir and returns it's path                        |
+| `fs.ctime(...)`                   | `integer`    | returns the creation time for the path.                      |
+| `fs.mtime(...)`                   | `integer`    | returns the modify time for the path.                        |
+| `fs.atime(...)`                   | `integer`    | returns the access time for the path.                        |
+| `fs.size(...)`                    | `integer`    | returns the file size for the path.                          |
+| `fs.touch(...[, atime[, mtime]])` | `string`     | update the access/modify time for the path file, if file is not exists, create it. |
+| `fs.remove(...)`                  | `string`     | delete file.                                                 |
+| `fs.copy(source, target)`         | `string`     | copy file from the source path to the target path.           |
+| `fs.rename(source, target)`       | `string`     | move file from the source path to the target path.           |
+| `fs.exists(...)`                  | `boolean`    | same as `path.exists`                                        |
+| `fs.getcwd()`                     | `string`     | same as `path.cwd()`                                         |
+| `fs.binpath()`                    | `string`     | same as `path.bin()`                                         |
+| `fs.is{dir/link/file/mount}`      | `string`     | same as correspond routines in `path` module.                |
+
+### `path.env`
+
+| routine               | return value  | description                                                  |
+| --------------------- | ------------- | ------------------------------------------------------------ |
+| `env.get(key)`        | `string`      | fetch a environment variable value.                          |
+| `env.set(key, value)` | `string`      | set the environment variable value and returns the new value. |
+| `env.expand(...)`     | `string`      | return a path that all environment variables replaced.       |
+| `env.uname()`         | `string`, ... | returns the informations for the current operation system.   |
+
+### `path.info`
 
 `path.info` has several constants about current system:
+
   - `platform`:
       - `"windows"`
       - `"linux"`
@@ -25,240 +103,11 @@ parts: `path.info`, `path.fs` and `path` itself.
   - `extsep`: extension separator, usually `"."`.
   - `pathsep`: the separator for $PATH, `";"` on Windows, otherwise `":"`.
 
-`path.fs` has functions that implemented by `lfs`, such as folder
-listing, folder tree walker, etc.
+## License
 
-`path` has functions that maintains the Python os.path module. Such as
-normalize path, split path into directory and filename
-(`path.split()`), basename and extension name (`path.splitext()`) or
-drive volume and paths (`path.splitdrive()`).
-
-All functions expect iterators return 2 values on error: a `nil`, and
-a error message.  Error message is encoded by ANSI code page by
-default.
-
-using `path.utf8()` and `path.ansi()` change the default code page
-used by module. and beside the default code page, if you wanna UTF-8
-string, call `path.utf8()` on ANSI string; if you wanna ANSI string,
-call `path.ansi()` on UTF-8 string.
-
-Some of functions accepts only one type of argument: `[comp]`.
-`[comp]` is a list of strings, can be empty. If `[comp]` is empty, the
-argument passed to function is `"./"`, i.e. current directory.
-Otherwise these function will call `path.join()` on the list of
-strings, and pass the result of `path.join()` to functions.
-
-Functions that accept `[comp]`:
-  - `path.abs()`
-  - `path.isabs()`
-  - `path.itercomp()`
-  - `path.join()`
-  - `path.fs.chdir()`
-  - `path.fs.dir()`
-  - `path.fs.exists()`
-  - `path.fs.expandvars()`
-  - `path.fs.fsize()`
-  - `path.fs.ftime()`
-  - `path.fs.makedirs()`
-  - `path.fs.mkdir()`
-  - `path.fs.realpath()`
-  - `path.fs.remove()`
-  - `path.fs.removedirs()`
-  - `path.fs.rmdir()`
-  - `path.fs.type()`
-  - `path.fs.walk()`
-
-
-Functions:
-----------
-
-- `path.fs.platform() -> string`
-> return a system name from `uname()` if use POSIX systems. return
-> `"Windows m.n Build bbbb"` on Windows systems, `m` is the major
-> version, `n` is the minor version, and `bbbb` is the build number.
-
-- `path.fs.binpath() -> string`
-> get the file path of current execuable file.
-
-- `path.fs.getcwd() -> string`
-> get the current working directory.
-
-- `path.fs.realpath([comp]) -> string`
-> return the real path after all symbolic link resolved. On Windows, on
-> systems before Vista this function is same as path.abs(), but after
-> Vista it also resolved the NTFS symbolic link.
-
-- `path.fs.chdir([comp]) -> string`
-> change current working directory to `[comp]`.
-
-- `path.fs.mkdir(path, mode) -> string`
-> create directory for `path`, mode is ignored on Windows.
-
-- `path.fs.makedirs([comp]) -> string`
-> create directory for `[comp]`, automatic create mediately folders.
-
-- `path.fs.rmdir([comp]) -> string`
-> remove directory, directory should empty.
-
-- `path.fs.removedirs([comp]) -> string`
-> remove directory and files in directory.
-
-- `path.fs.dir([comp]) -> iterator`
-> return a iterator to list all files/folders in directory `[comp]`.
-> Iterator will return `name`, `type`, `size`, `[CMA]` file times in
-> for:
-> 
-> ```lua
-> for fname, type, size, ctime, mtime, atime in path.fs.dir(".") do
->    -- ...
-> end
-> ```
-> 
-> Sometimes you only want `name` or `type` or `size`, just ignore remain
-> return values:
-> 
-> ```lua
-> for fname, type in path.fs.dir(".") do
->    print(fname, "is a", type)
-> end
-> ```
-
-- `path.fs.walk([comp]) -> iterator`
-> same as `path.fs.dir()`, but iterator a folder tree, recursively.
-> notice that a directory will occurs in loop, one have type "in", and
-> one have type "out", call `walk()` on a path:
-> ```
-> + a
->   | b
->   | c
-> ```
-> will result:
-> ```
-> "a/", "in"
-> "a/b", "file"
-> "a/c", "file"
-> "a/", "out"
-> ```
-
-- `path.fs.type([comp]) -> string`
-> get the file type (file, dir or link) of file.
-
-- `path.fs.exists([comp]) -> boolean`
-> judge a path real have a file
-
-- `path.fs.ftime([comp]) -> ctime, mtime, atime`
-> return the create time, modify time and access time of file.
-
-- `path.cmpftime(file1, file2, use_atime) `
-> return a integer, `0` for equal, `1` for `file1` is newer than
-> `file2`, `-1` for `file1` is older than `file2`.
-> if use_atime is true, the compare use access time, otherwise only
-> use create time and modify time only.
-
-- `path.fs.fsize([comp]) -> number`
-> return the size of file.
-
-- `path.fs.touch(path[, mtime[, atime]]) -> path`
-> if `path` is not exists, create a empty file at `path`, otherwise
-> update file's time to current. If given `atime` or `mtime`,
-> update file's time to these values.
-
-- `path.fs.copy(f1, f2[, fail_if_exists]) -> true`
-> copy `f1` to `f2`. If `fail_if_exists` is true and `f2` exists, this
-> function fails.
-
-- `path.fs.rename(f1, f2)`
-> rename/move `f1` to `f2`, if `f2` exists, this function fails.
-
-- `path.fs.remove([comp]) -> string`
-> remove file.
-
-- `path.fs.getenv(name)`
-> get value of a environment variable.
-
-- `path.fs.setenv(name, value)`
-> set a environment variable.
-
-- `path.fs.expandvars([comp]) -> string`
-> expandvars environment variables in string.
-
-- `path.fs.glob(pattern[, dir[, table[, limit]]]) -> table`
-> glob with pattern in `dir`, using table if passed.
-> e.g. `fs.glob "*.txt"` return a table contains all txt file in
-> current directory.
-> use `limit` control the recursive level, pass 1 for only one level
-> of directory, and pass negative number (-1) to traver all sub
-> directory in `dir`.
-
-- `path.fs.fnmatch(path, pattern) -> boolean`
-> the fnmatch algorithm used by `path.fs.glob()`, return a boolean
-> value for whether the path matches the pattern.
-
-
-- `path.ansi(string) -> string`
-- `path.utf8(string) -> string`
-> these functions convert string between ANSI code pages and UTF-8 on
-> Windows.  On other System (especially POSIX systems) these functions
-> does nothing.
-
-- `path.type([comp]) -> string`
-> get the type of file, return `"file"`, `"dir"` or `"link"`.
-
-- `path.isabs(string) -> boolean`
-> return whether the string is a absolute path.
-
-- `path.abs([comp]) -> string`
-> return the absolute path for [comp]. Same as Python's
-> `os.path.abspath()`
-
-- `path.rel(filepath, path) -> string`
-> return relative path for filepath based on path. Same as Python's
-> `os.path.relpath()`
-
-- `path.itercomp([comp]) -> iterator`
-> return a iterator that iterate the component of path. e.g.
-> ```lua
-> for comp in path.itercomp("a/b/c/d") do
->    print(comp)
-> end
-> -- print:
-> -- a
-> -- b
-> -- c
-> -- d
-> ```
-
-- `path([comp]) -> string`
-- `path.join([comp]) -> string`
-> join all arguments with path sep (`"\\"` on Windows, `"/"` otherwise).
-> these routines will normalize the path, e.g. "a/../b" become "b"
-
-- `path.split([comp]) -> dirname, basename`
-> split file path into directory name and base name.
-
-- `path.splitdrive([comp]) -> drive/UNC, path`
-> split file path into UNC part/drive volume and base name.
-> e.g. D:\foo\bar into D: and \foo\bar,
->      \\server\mountpoint\foo\bar into
->      \\server\mountpoint and \foo\bar
-
-- `path.splitext([comp]) -> base-with-dirname, ext`
-> split file path into base name and extension name.
-> e.g. `\foo\bar\baz.exe` into `\foo\bar\baz` and `.exe`.
-
-- `path.trim([comp]) -> string`
-> trim the path's trailling dir sep (and possibly spaces).
-> e.g. `  \a\b\c\  ` into `\a\b\c`.
-
-
-License
-=======
 Same as Lua's License.
 
-Build
-=====
+## Build
+
 See here: http://lua-users.org/wiki/BuildingModules
 
-To do
-=====
-Complete test suite
