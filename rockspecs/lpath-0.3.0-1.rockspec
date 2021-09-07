@@ -1,9 +1,10 @@
 -- vim: ft=lua
 package = "lpath"
-version = "scm-0"
+version = "0.3.0-1"
 
 source = {
    url = "git://github.com/starwing/lpath.git",
+   tag = "0.3.0"
 }
 
 description = {
