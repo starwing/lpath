@@ -861,7 +861,9 @@ function _G.test_makedirs()
    eq(fs.size "txtfile", 10)
    assert(fs.copy("txtfile", "txtfile2"))
    assert(fs.rename("txtfile2", "txtfile3"))
-   assert(fs.symlink("txtfile", "txtfile4"))
+   if info.platform ~= "windows" then
+      assert(fs.symlink("txtfile", "txtfile4"))
+   end
 end
 in_tmpdir "test_makedirs"
 
@@ -1015,16 +1017,16 @@ function _G.test_attr()
    assert(not fs.islink "-not-exists-")
 
    if info.platform == "windows" then
-      fail(".-size:%-not%-exists%-:%(errno%=2%).*",
-         function() assert(fs.size "-not-exists-") end)
-      fail(".-remove:%-not%-exists%-:%(errno%=2%).*",
-         function() assert(fs.remove "-not-exists-") end)
+      fail(".-size:_not_exists_:%(errno%=2%).*",
+         function() assert(fs.size "_not_exists_") end)
+      fail(".-remove:_not_exists_:%(errno%=2%).*",
+         function() assert(fs.remove "_not_exists_") end)
       fail(".-rename::%(errno%=2%).*",
-         function() assert(fs.rename("-not-exists-", "")) end)
+         function() assert(fs.rename("_not_exists_", "")) end)
       fail(".-copy::%(errno%=2%).*",
-         function() assert(fs.copy("-not-exists-", "")) end)
-      fail(".-open:%-not%-exists%-:%(errno%=2%).*",
-         function() assert(path.resolve("-not-exists-")) end)
+         function() assert(fs.copy("_not_exists_", "")) end)
+      fail(".-resolve:_not_exists_:%(errno%=%d+%).*",
+         function() assert(path.resolve("_not_exists_")) end)
       assert(fs.ismount("//foo/bar"))
       assert(fs.ismount("//foo/bar/"))
       assert(fs.ismount("C:/"))
@@ -1032,6 +1034,19 @@ function _G.test_attr()
       assert(not fs.ismount("//?/C:"))
       assert(fs.ismount("//?/C:/"))
       assert(fs.ismount("//./"))
+   else
+      fail(".-size:_not_exists_:%(errno%=%d+%).*",
+         function() assert(fs.size "_not_exists_") end)
+      fail(".-remove:_not_exists_:%(errno%=%d+%).*",
+         function() assert(fs.remove "_not_exists_") end)
+      fail(".-rename::%(errno%=%d+%).*",
+         function() assert(fs.rename("_not_exists_", "")) end)
+      fail(".-open:_not_exists_:%(errno%=%d+%).*",
+         function() assert(fs.copy("_not_exists_", "")) end)
+      fail(".-realpath:_not_exists_:%(errno%=%d+%).*",
+         function() assert(path.resolve("_not_exists_")) end)
+      fail(".-symlink:test:%(errno%=%d+%).*",
+         function() assert(fs.symlink("_not_exists_", "test")) end)
    end
 end
 in_tmpdir "test_attr"

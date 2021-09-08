@@ -1109,10 +1109,8 @@ static int lp_pusherror(lua_State *L, const char *title, const char *fn) {
     lua_pushnil(L);
     if (title && fn)
         lua_pushfstring(L, "%s:%s:(errno=%d): %s", title, fn, err, msg);
-    else if (title || fn)
-        lua_pushfstring(L, "%s:(errno=%d): %s", title ? title : fn, err, msg);
     else
-        lua_pushfstring(L, "lpath:(errno=%d): %s", err, msg);
+        lua_pushfstring(L, "%s:(errno=%d): %s", title ? title : fn, err, msg);
     return -2;
 }
 
@@ -1344,7 +1342,7 @@ static int lpL_rename(lua_State *L) {
     const char *from = luaL_checkstring(L, 1);
     const char *to = luaL_checkstring(L, 2);
     return rename(from, to) == 0 ? lp_bool(L, 1) :
-        -lp_pusherror(L, "rename", NULL);
+        -lp_pusherror(L, "rename", to);
 }
 
 static int lpL_copy(lua_State *L) {
@@ -1374,7 +1372,7 @@ static int lpL_symlink(lua_State *L) {
     const char *from = luaL_checkstring(L, 1);
     const char *to = luaL_checkstring(L, 2);
     return symlink(from, to) == 0 ? lp_bool(L, 1) :
-        -lp_pusherror(L, "symlink", NULL);
+        -lp_pusherror(L, "symlink", to);
 }
 
 /* path informations */
@@ -1383,7 +1381,7 @@ static int lp_realpath(lp_State *S, const char *s) {
     char *ret = (vec_push(S->L, S->buf, 0),
             vec_grow(S->L, S->buf, PATH_MAX));
     return realpath(s, ret) ?  (lua_pushstring(S->L, ret), 1) :
-        lp_pusherror(S->L, "realpath", NULL);
+        lp_pusherror(S->L, "realpath", s);
 }
 
 #define lpP_isattr(CHECK)                              do { \
@@ -2130,7 +2128,7 @@ LUAMOD_API int luaopen_path_info(lua_State *L) {
     return 1;
 }
 
-/* cc: flags+='-ggdb -Wextra -Wno-cast-function-type --coverage' run='lua tt.lua'
+/* cc: flags+='-ggdb -Wextra -Wno-cast-function-type --coverage' run='lua test.lua'
  * unixcc: flags+='-O3 -shared -fPIC' output='path.so'
  * maccc: flags+='-shared -undefined dynamic_lookup' output='path.so'
  * win32cc: lua='Lua54' flags+='-ggdb -mdll -DLUA_BUILD_AS_DLL -IC:/Devel/$lua/include'
