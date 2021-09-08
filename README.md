@@ -51,30 +51,31 @@ All routines may returns `nil, error` for error case. if you want raise error to
 
 ### `path.fs`
 
-| routine                           | return value | description                                                  |
-| --------------------------------- | ------------ | ------------------------------------------------------------ |
-| `fs.dir(...)`                     | `iterator`   | returns a iterator `filename, type` to list all child items in path. |
-| `fs.scandir(...[, depth])`        | `iterator`   | same as `fs.dir`, but  walk into sub directories recursively. |
-| `fs.glob(...[, depth])`           | `iterator`   | same as `fs.scandir`, but accepts a pattern for filter the items in directory. |
-| `fs.chdir(...)`                   | `string`     | change current working directory and returns the path, or `nil` for error. |
-| `fs.mkdir(...)`                   | `string`     | create directory.                                            |
-| `fs.rmdir(...)`                   | `string`     | remove empty directory.                                      |
-| `fs.makedirs(...)`                | `string`     | create directory recursively.                                |
-| `fs.remvoedirs(...)`              | `string`     | remove all items in a directory recursively.                 |
-| `fs.unlockdirs(...)`              | `string`     | add write perimission for all files in a directory recursively. |
-| `fs.tmpdir(prefix)`               | `string`     | create a tmpdir and returns it's path                        |
-| `fs.ctime(...)`                   | `integer`    | returns the creation time for the path.                      |
-| `fs.mtime(...)`                   | `integer`    | returns the modify time for the path.                        |
-| `fs.atime(...)`                   | `integer`    | returns the access time for the path.                        |
-| `fs.size(...)`                    | `integer`    | returns the file size for the path.                          |
-| `fs.touch(...[, atime[, mtime]])` | `string`     | update the access/modify time for the path file, if file is not exists, create it. |
-| `fs.remove(...)`                  | `string`     | delete file.                                                 |
-| `fs.copy(source, target)`         | `string`     | copy file from the source path to the target path.           |
-| `fs.rename(source, target)`       | `string`     | move file from the source path to the target path.           |
-| `fs.exists(...)`                  | `boolean`    | same as `path.exists`                                        |
-| `fs.getcwd()`                     | `string`     | same as `path.cwd()`                                         |
-| `fs.binpath()`                    | `string`     | same as `path.bin()`                                         |
-| `fs.is{dir/link/file/mount}`      | `string`     | same as correspond routines in `path` module.                |
+| routine                               | return value | description                                                  |
+| ------------------------------------- | ------------ | ------------------------------------------------------------ |
+| `fs.dir(...)`                         | `iterator`   | returns a iterator `filename, type` to list all child items in path. |
+| `fs.scandir(...[, depth])`            | `iterator`   | same as `fs.dir`, but  walk into sub directories recursively. |
+| `fs.glob(...[, depth])`               | `iterator`   | same as `fs.scandir`, but accepts a pattern for filter the items in directory. |
+| `fs.chdir(...)`                       | `string`     | change current working directory and returns the path, or `nil` for error. |
+| `fs.mkdir(...)`                       | `string`     | create directory.                                            |
+| `fs.rmdir(...)`                       | `string`     | remove empty directory.                                      |
+| `fs.makedirs(...)`                    | `string`     | create directory recursively.                                |
+| `fs.remvoedirs(...)`                  | `string`     | remove all items in a directory recursively.                 |
+| `fs.unlockdirs(...)`                  | `string`     | add write perimission for all files in a directory recursively. |
+| `fs.tmpdir(prefix)`                   | `string`     | create a tmpdir and returns it's path                        |
+| `fs.ctime(...)`                       | `integer`    | returns the creation time for the path.                      |
+| `fs.mtime(...)`                       | `integer`    | returns the modify time for the path.                        |
+| `fs.atime(...)`                       | `integer`    | returns the access time for the path.                        |
+| `fs.size(...)`                        | `integer`    | returns the file size for the path.                          |
+| `fs.touch(...[, atime[, mtime]])`     | `string`     | update the access/modify time for the path file, if file is not exists, create it. |
+| `fs.remove(...)`                      | `string`     | delete file.                                                 |
+| `fs.copy(source, target)`             | `boolean`    | copy file from the source path to the target path.           |
+| `fs.rename(source, target)`           | `boolean`    | move file from the source path to the target path.           |
+| `fs.symlink(source, target[, isdir])` | `boolean`    | create a symbolic link from the source path to the target path. |
+| `fs.exists(...)`                      | `boolean`    | same as `path.exists`                                        |
+| `fs.getcwd()`                         | `string`     | same as `path.cwd()`                                         |
+| `fs.binpath()`                        | `string`     | same as `path.bin()`                                         |
+| `fs.is{dir/link/file/mount}`          | `string`     | same as correspond routines in `path` module.                |
 
 ### `path.env`
 

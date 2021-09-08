@@ -499,10 +499,8 @@ static int lpL_ansi(lua_State *L) {
     const char *utf8;
     switch (lua_type(L, 1)) {
     case LUA_TNONE:
-    case LUA_TNIL:
-    case LUA_TNUMBER:
-        S->cp = (UINT)lua_tonumber(L, 1);
-        return 0;
+    case LUA_TNIL:    return S->cp = CP_ACP, 0;
+    case LUA_TNUMBER: return S->cp = (UINT)lua_tonumber(L, 1), 0;
     case LUA_TSTRING:
         utf8 = lua_tolstring(L, 1, &len);
         lpP_addl2wstring(L, &S->wbuf, utf8, (int)len, CP_UTF8);
@@ -521,10 +519,8 @@ static int lpL_utf8(lua_State *L) {
     const char *ansi;
     switch (lua_type(L, 1)) {
     case LUA_TNONE:
-    case LUA_TNIL:
-    case LUA_TNUMBER:
-        S->cp = (UINT)lua_tonumber(L, 1);
-        return 0;
+    case LUA_TNIL:    return S->cp = CP_UTF8, 0;
+    case LUA_TNUMBER: return S->cp = (UINT)lua_tonumber(L, 1), 0;
     case LUA_TSTRING:
         ansi = lua_tolstring(L, 1, &len);
         lpP_addl2wstring(L, &S->wbuf, ansi, (int)len, S->cp);
@@ -834,6 +830,33 @@ static int lpL_copy(lua_State *L) {
         -lp_pusherror(L, "copy", to);
 }
 
+static DWORD lp_CreateSymbolicLinkW(lua_State *L, LPCWSTR lpSymlinkFileName, LPCWSTR lpTargetFileName, DWORD dwFlags) {
+    typedef BOOLEAN APIENTRY F(LPCWSTR lpSymlinkFileName, LPCWSTR lpTargetFileName, DWORD dwFlags);
+    static F* f;
+    if (!f) {
+        HMODULE hModule = GetModuleHandleA("KERNEL32.dll");
+        if (hModule != NULL) {
+            union { F *f; FARPROC v; } u;
+            u.v = GetProcAddress(hModule, "CreateSymbolicLinkW");
+            f = u.f;
+        }
+        if (!f) return luaL_error(L, "CreateSymbolicLinkW not implemented");
+    }
+    return f(lpSymlinkFileName, lpTargetFileName, dwFlags);
+}
+
+static int lpL_symlink(lua_State *L) {
+    lp_State *S = lp_getstate(L);
+    size_t flen, tlen;
+    const char *from = luaL_checklstring(L, 1, &flen);
+    const char *to = luaL_checklstring(L, 2, &tlen);
+    int dir = lua_toboolean(L, 3) ? /*SYMBOLIC_LINK_FLAG_DIRECTORY=*/1 : 0;
+    LPWSTR wto = (lpP_addl2wstring(L, &S->wbuf, from, (int)flen+1, S->cp),
+            lpP_addl2wstring(L, &S->wbuf, to, (int)tlen, S->cp));
+    return lp_CreateSymbolicLinkW(L, wto, S->wbuf, dir) ? lp_bool(L, 1) :
+        -lp_pusherror(L, "copy", to);
+}
+
 /* path informations */
 
 static int lp_abs(lp_State *S, const char *s) {
@@ -902,46 +925,51 @@ static int lp_ctime(lp_State *S, const char *s) {lp_time(c, CreationTime);  }
 static int lp_mtime(lp_State *S, const char *s) {lp_time(m, LastWriteTime); }
 static int lp_atime(lp_State *S, const char *s) {lp_time(a, LastAccessTime);}
 
-typedef DWORD (WINAPI *LPGETFINALPATHNAMEBYHANDLEW)(
-        HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
-static LPGETFINALPATHNAMEBYHANDLEW pGetFinalPathNameByHandleW;
+static DWORD lp_GetFinalPathNameByHandleW(lua_State *L, HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags) {
+    typedef DWORD WINAPI F(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
+    static F* f;
+    if (!f) {
+        HMODULE hModule = GetModuleHandleA("KERNEL32.dll");
+        if (hModule != NULL) {
+            union { F *f; FARPROC v; } u;
+            u.v = GetProcAddress(hModule, "GetFinalPathNameByHandleW");
+            f = u.f;
+        }
+        if (!f) return luaL_error(L, "GetFinalPathNameByHandleW not implemented");
+    }
+    return f(hFile, lpszFilePath, cchFilePath, dwFlags);
+}
 
-static int lp_solvelink(lp_State *S, const char *s) {
-    LPWSTR ret;
-    HANDLE hFile = CreateFileW(lpP_addwstring(S, s), /* file to open */
-            0,                     /* open only for handle */
-            FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, /* share for everything */
-            NULL,                  /* default security     */
-            OPEN_EXISTING,         /* existing file only   */
-            FILE_FLAG_BACKUP_SEMANTICS, /* no file attributes   */
-            NULL);                 /* no attr. template    */
-    DWORD wc;
-    if(hFile == INVALID_HANDLE_VALUE)
-        return lp_pusherror(S->L, "open", s);
-    ret = vec_grow(S->L, S->wbuf, MAX_PATH);
-    wc = pGetFinalPathNameByHandleW(hFile, ret, MAX_PATH, 0);
+static int lpP_realpath(lua_State *L) {
+    lp_State *S = (lp_State*)lua_touserdata(L, 1);
+    HANDLE *phFile = (HANDLE*)lua_touserdata(L, 2);
+    LPWSTR ret = vec_grow(S->L, S->wbuf, MAX_PATH);
+    DWORD wc = lp_GetFinalPathNameByHandleW(S->L, *phFile, ret, MAX_PATH, 0);
     if (wc >= MAX_PATH) {
         ret = vec_grow(S->L, S->wbuf, wc);
-        wc = pGetFinalPathNameByHandleW(hFile, ret, wc, 0);
+        wc = lp_GetFinalPathNameByHandleW(S->L, *phFile, ret, wc, 0);
     }
-    CloseHandle(hFile);
-    if (wc == 0) return lp_pusherror(S->L, "resolve", s);
+    if (wc == 0) return lp_pusherror(S->L, "resolve", S->buf), lua_error(L);
     if (wc <= MAX_PATH + 4) ret += 4, wc -= 4;
     vec_reset(S->buf), lpP_addlw2string(S->L, &S->buf, ret, wc, S->cp);
     return lp_pushresult(S);
 }
 
 static int lp_realpath(lp_State *S, const char *s) {
-    if (!pGetFinalPathNameByHandleW) {
-        HMODULE hModule = GetModuleHandleA("KERNEL32.dll");
-        if (hModule != NULL) {
-            union { LPGETFINALPATHNAMEBYHANDLEW f;
-                    FARPROC                     v; } u;
-            u.v = GetProcAddress(hModule, "GetFinalPathNameByHandleW");
-            pGetFinalPathNameByHandleW = u.f;
-        }
-    }
-    return pGetFinalPathNameByHandleW ? lp_solvelink(S, s) : lp_abs(S, s);
+    HANDLE hFile = CreateFileW(lpP_addwstring(S, s), /* file to open */
+            0,                          /* open only for handle */
+            FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+            NULL,                       /* default security     */
+            OPEN_EXISTING,              /* existing file only   */
+            FILE_FLAG_BACKUP_SEMANTICS, /* no file attributes   */
+            NULL);                      /* no attr. template    */
+    int ret;
+    lua_pushcfunction(S->L, lpP_realpath);
+    lua_pushlightuserdata(S->L, S);
+    lua_pushlightuserdata(S->L, &hFile);
+    ret = lua_pcall(S->L, 2, 1, 0);
+    CloseHandle(hFile);
+    return ret == LUA_OK ? 1 : (lua_pushnil(S->L), lua_insert(S->L, -2), 2);
 }
 
 /* utils */
@@ -1340,6 +1368,13 @@ static int lpL_copy(lua_State *L) {
     }
     close(source), close(dest);
     return lp_bool(L, 1);
+}
+
+static int lpL_symlink(lua_State *L) {
+    const char *from = luaL_checkstring(L, 1);
+    const char *to = luaL_checkstring(L, 2);
+    return symlink(from, to) == 0 ? lp_bool(L, 1) :
+        -lp_pusherror(L, "symlink", NULL);
 }
 
 /* path informations */
@@ -2051,6 +2086,7 @@ LUAMOD_API int luaopen_path_fs(lua_State *L) {
         ENTRY(remove),
         ENTRY(copy),
         ENTRY(rename),
+        ENTRY(symlink),
         LP_COMMON(ENTRY)
 #undef  ENTRY
         { NULL, NULL }

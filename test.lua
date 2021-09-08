@@ -861,6 +861,7 @@ function _G.test_makedirs()
    eq(fs.size "txtfile", 10)
    assert(fs.copy("txtfile", "txtfile2"))
    assert(fs.rename("txtfile2", "txtfile3"))
+   assert(fs.symlink("txtfile", "txtfile4"))
 end
 in_tmpdir "test_makedirs"
 
