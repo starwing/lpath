@@ -36,9 +36,9 @@ All routines may returns `nil, error` for error case. if you want raise error to
 | `path.anchor(...)`              | `string`     | same as `path.drive(...) .. path.root(...)`                  |
 | `path.parent(...)`              | `string`     | returns the parent path for path.                            |
 | `path.name(...)`                | `string`     | returns the file name part of the path.                      |
-| `path.stem(...)`                | `string`     | returns the file name part without shuffix name of the path. |
-| `path.shuffix(...)`             | `string`     | returns  the shuffix name of the path.                       |
-| `path.shuffixes(...)`           | `iteraotr`   | returns  a `idx`, `shuffix` iterator to get shuffix names of the path. |
+| `path.stem(...)`                | `string`     | returns the file name part without suffix name of the path.  |
+| `path.suffix(...)`              | `string`     | returns  the suffix name of the path.                        |
+| `path.suffixes(...)`            | `iteraotr`   | returns  a `idx`, `suffix` iterator to get suffix names of the path. |
 | `path.parts(...)`               | `iterator`   | returns  a `idx`, `part` iterator to get parts in the path.  |
 | `path.exists(...)`              | `boolean`    | returns whether the path is exists in file system (same as `fs.exists()`) |
 | `path.resolve(...)`             | `string`     | returns the path itself, or the target path if path is a symlink. |

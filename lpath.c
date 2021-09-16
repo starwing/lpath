@@ -804,6 +804,7 @@ static int lpL_touch(lua_State *L) {
     HANDLE hFile = lpP_open(ws, FILE_WRITE_ATTRIBUTES, OPEN_ALWAYS);
     if (hFile == INVALID_HANDLE_VALUE)
         return -lp_pusherror(S->L, "open", s);
+    lua_settop(L, 3);
     lua_pushcfunction(L, lpP_touch);
     lua_pushlightuserdata(L, &hFile);
     lua_pushvalue(L, 1);
@@ -1989,14 +1990,14 @@ static int lpL_stem(lua_State *L) {
     return lua_pushlstring(L, name.s, ext - name.s), 1;
 }
 
-static int lpL_shuffix(lua_State *L) {
+static int lpL_suffix(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
     lp_Part name = lp_name(&S->pr);
     const char *ext = lp_splitext(name);
     return lua_pushlstring(L, ext, name.e - ext), 1;
 }
 
-static int lp_itershuffixes(lua_State *L) {
+static int lp_itersuffixes(lua_State *L) {
     size_t len, pos = (size_t)lua_tointeger(L, lua_upvalueindex(2)), end = pos;
     const char *s = lua_tolstring(L, lua_upvalueindex(1), &len);
     lua_Integer i = lua_tointeger(L, lua_upvalueindex(3));
@@ -2011,7 +2012,7 @@ static int lp_itershuffixes(lua_State *L) {
     return 2;
 }
 
-static int lpL_shuffixes(lua_State *L) {
+static int lpL_suffixes(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
     lp_Part name = lp_name(&S->pr);
     const char *ext = name.s < name.e && name.e[-1] == LP_EXTSEP[0] ?
@@ -2023,7 +2024,7 @@ static int lpL_shuffixes(lua_State *L) {
     lua_pushlstring(L, ext, name.e - ext);
     lua_pushinteger(L, 0);
     lua_pushinteger(L, 0);
-    return lua_pushcclosure(L, lp_itershuffixes, 3), 1;
+    return lua_pushcclosure(L, lp_itersuffixes, 3), 1;
 }
 
 static int lpL_libcall(lua_State *L) {
@@ -2055,8 +2056,8 @@ LUAMOD_API int luaopen_path(lua_State *L) {
         ENTRY(parent),
         ENTRY(name),
         ENTRY(stem),
-        ENTRY(shuffix),
-        ENTRY(shuffixes),
+        ENTRY(suffix),
+        ENTRY(suffixes),
         LP_COMMON(ENTRY)
 #undef  ENTRY
         { NULL, NULL }
