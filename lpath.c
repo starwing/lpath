@@ -1488,6 +1488,7 @@ static int lpL_expandvars(lua_State *L) {
 #else
     wordexp_t p;
     int ret, top = lua_gettop(L);
+    memset(&p, 0, sizeof(wordexp_t));
     lua_pushcfunction(L, lp_exapndvars);
     lua_pushlightuserdata(L, &p);
     lua_pushlightuserdata(L, S);
