@@ -1455,6 +1455,10 @@ static int lpL_getenv(lua_State *L) {
 static int lpL_setenv(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     const char *value = luaL_optstring(L, 2, NULL);
+    if (value == NULL) {
+        return unsetenv(name) == 0 ? (lua_settop(L, 2), 1) :
+            -lp_pusherror(L, "unsetenv", NULL);
+    }
     return setenv(name, value, 1) == 0 ? (lua_settop(L, 2), 1) :
         -lp_pusherror(L, "setenv", NULL);
 }
