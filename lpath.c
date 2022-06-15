@@ -2144,6 +2144,6 @@ LUAMOD_API int luaopen_path_info(lua_State *L) {
 /* cc: flags+='-ggdb -Wextra -Wno-cast-function-type --coverage' run='lua test.lua'
  * unixcc: flags+='-O3 -shared -fPIC' output='path.so'
  * maccc: flags+='-shared -undefined dynamic_lookup' output='path.so'
- * win32cc: lua='Lua54' flags+='-ggdb -mdll -DLUA_BUILD_AS_DLL -IC:/Devel/$lua/include'
+ * win32cc: lua='Lua54' flags+='-s -O3 -mdll -DLUA_BUILD_AS_DLL -IC:/Devel/$lua/include'
  * win32cc: libs+='-L C:/Devel/$lua/lib -l$lua' output='path.dll' */
 

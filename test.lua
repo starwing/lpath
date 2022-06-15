@@ -690,7 +690,7 @@ function _G.test_env()
       eq(env.set("FOO", "BAR"), "BAR")
       eq(env.get "FOO", "BAR")
       eq(env.expand "abc${FOO}abc", "abcBARabc")
-      fail(".-syntax error",
+      fail(".-syntax error.*",
          function() assert(env.expand("$(ls /")) end)
    end
 end
