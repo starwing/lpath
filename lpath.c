@@ -1114,13 +1114,20 @@ static int lpL_expandvars(lua_State *L) {
 # include <wordexp.h>
 #endif
 #ifdef __APPLE__
-# include <libproc.h>
+#include <TargetConditionals.h>
+# if TARGET_OS_OSX
+#   include <libproc.h>
+# endif
 #endif
 
 #if defined(__linux__)
 # define LP_PLATFORM "linux"
-#elif defined(__APPLE__) && defined(__MACH__)
-# define LP_PLATFORM "macosx"
+#elif defined(__APPLE__)
+# if TARGET_OS_IPHONE
+#   define LP_PLATFORM "iOS"
+# else
+#   define LP_PLATFORM "macOS"
+# endif
 #elif defined(__ANDROID__)
 # define LP_PLATFORM "android"
 #else
@@ -1176,8 +1183,7 @@ static int lpP_isdir(lp_Walker *w, struct dirent *ent) {
     return (void)w, ent->d_type == DT_DIR;
 #else
     struct stat buf;
-    (void)ent, *vec_grow(L, w->path, 1) = 0;
-    return lstat(w->path, &buf) == 0 && S_ISDIR(buf.st_mode);
+    return (void)ent, lstat(w->path, &buf) == 0 && S_ISDIR(buf.st_mode);
 #endif
 }
 
@@ -1239,6 +1245,11 @@ static int lpL_getcwd(lua_State *L) {
 }
 
 static int lpL_binpath(lua_State *L) {
+#if defined(__APPLE__) && !defined(TARGET_OS_OSX)
+    lua_pushnil(L);
+    lua_pushstring(L, "binpath not supoort on iOS");
+    return 2;
+#else
     lp_State *S = lp_getstate(L);
 #ifdef __APPLE__
     char *ret = vec_grow(L, S->buf, PROC_PIDPATHINFO_MAXSIZE);
@@ -1249,8 +1260,8 @@ static int lpL_binpath(lua_State *L) {
     if (readlink("/proc/self/exe", ret, PATH_MAX) < 0)
         return -lp_pusherror(L, "binpath", NULL);
 #endif
-    lua_pushstring(L, ret);
-    return 1;
+    return lua_pushstring(L, ret), 1;
+#endif
 }
 
 static int lp_abs(lp_State *S, const char *s) {
@@ -1479,7 +1490,7 @@ static int lpL_setenv(lua_State *L) {
         -lp_pusherror(L, "setenv", NULL);
 }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && (!defined(__APPLE__) || defined(TARGET_OS_OSX))
 static int lp_exapndvars(lua_State *L) {
     wordexp_t *p = (wordexp_t*)lua_touserdata(L, 1);
     lp_State *S = (lp_State*)lua_touserdata(L, 2);
@@ -1504,6 +1515,10 @@ static int lpL_expandvars(lua_State *L) {
 #ifdef __ANDROID__
     lua_pushnil(L);
     lua_pushstring(L, "expandvars not support on Android");
+    return -2;
+#elif defined(__APPLE__) && !defined(TARGET_OS_OSX)
+    lua_pushnil(L);
+    lua_pushstring(L, "expandvars not support on iOS");
     return -2;
 #else
     wordexp_t p;
@@ -1530,7 +1545,6 @@ typedef struct lp_ScanDir {
 
 static int lp_walknext(lua_State *L, lp_Walker *w) {
     if (w->state == LP_WALKINIT) return lpW_init(L, w);
-    if (w->state < 0) return w->state;
     for (;;) {
         if (w->state == LP_WALKOUT && vec_len(w->parts) == 0)
             return 0;
