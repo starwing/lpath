@@ -27,6 +27,7 @@ All routines may returns `nil, error` for error case. if you want raise error to
 | `path.ansi(string)`             | `string`     | convert UTF-8 `string` to current code page encoding.        |
 | `path.utf8()`                   | `none`       | set path string encoding to UTF-8.                           |
 | `path.utf8(string)`             | `string`     | convert current code page encoding `string` to UTF-8.        |
+| `path.alt(...)`                 | `string`     | return joined normalized path string using alternative sep.  |
 | `path.abs(...)`                 | `string`     | returns the absolute path for joined parts.                  |
 | `path.rel(path[, dir])`         | `string`     | returns  the relation path for dir (default for current work directory). |
 | `path.fnmatch(string, pattern)` | `boolean`    | returns whether the `pattern` matchs the `string`.           |

@@ -194,6 +194,28 @@ function _G.test_path()
       eq(path("a:b/c"), [[a:b/c]])
       eq(path("c:/b/c"), [[c:/b/c]])
    end
+   eq(path.alt(), '.')
+   eq(path.alt(""), [[.]])
+   eq(path.alt("a"), [[a]])
+   eq(path.alt("a/"), [[a/]])
+   eq(path.alt("a/."), [[a/]])
+   eq(path.alt("a/./b"), [[a/b]])
+   eq(path.alt("a/../b"), [[b]])
+   eq(path.alt("a/../../b"), [[../b]])
+   eq(path.alt("/a/../../b"), [[/b]])
+   eq(path.alt("/a/../../../../../../../../../..//b"), [[/b]])
+   eq(path.alt("a/b"), [[a/b]])
+   eq(path.alt(".."), [[..]])
+   eq(path.alt("../.."), [[../..]])
+   if info.platform == "windows" then
+      eq(path.alt("//a/b/c"), [[//A/B/c]])
+      eq(path.alt("a:b/c"), [[A:b/c]])
+      eq(path.alt("c:/b/c"), [[C:/b/c]])
+   else
+      eq(path.alt("//a/b/c"), [[//a/b/c]])
+      eq(path.alt("a:b/c"), [[a:b/c]])
+      eq(path.alt("c:/b/c"), [[c:/b/c]])
+   end
 end
 
 function _G.test_driveroot()
