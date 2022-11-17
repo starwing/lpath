@@ -657,6 +657,7 @@ function _G.test_match()
    assert_false(path.match('b.lua/c', 'b.lua'))
 
    -- Wilcard relative pattern.
+   assert_true(path.match('b.lua', 'b.lua'))
    assert_true(path.match('b.lua', '*.lua'))
    assert_true(path.match('a/b.lua', '*.lua'))
    assert_true(path.match('/a/b.lua', '*.lua'))

@@ -1802,13 +1802,14 @@ static int lpG_glob1(lua_State *L, lp_Glob *g, int res) {
 static int lpL_globiter(lua_State *L) {
     lp_Glob *g = luaL_checkudata(L, 1, LP_GLOB_TYPE);
     for (;;) {
-        int res = lp_walknext(L, &g->w);
+        int root, res = lp_walknext(L, &g->w);
         if (res < 0) return lua_error(L);
-        if (res == 0) break;
-        if (res == LP_WALKIN && vec_len(g->w.parts) == 0) continue;
-        if (lpG_glob1(L, g, res)) return lp_pushdirresult(L, &g->w);
+        if (res == 0) return 0;
+        root = (vec_len(g->w.parts) == 0);
+        if (root && res == LP_WALKIN) continue;
+        if ((root && res == LP_WALKFILE) || lpG_glob1(L, g, res))
+            return lp_pushdirresult(L, &g->w);
     }
-    return 0;
 }
 
 static int lpL_glob(lua_State *L) {
