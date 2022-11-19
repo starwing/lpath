@@ -3,8 +3,12 @@ tags*
 *.exe
 *.dll
 *.obj
+*.exp
+*.lib
+*.pdb
 *.so
 *.o
+*.dSYM
 
 *.gcno
 *.gcda
