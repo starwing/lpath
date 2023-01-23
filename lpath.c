@@ -164,7 +164,7 @@ typedef struct lp_Path {
 struct lp_State {
     lua_State     *L;
     char          *buf;
-    lp_Path        pr, pr1;
+    lp_Path        p, pp; /* path, pattern path */
 #ifdef _WIN32
     wchar_t       *wbuf;
     int            cp;
@@ -179,17 +179,17 @@ static lp_Part lp_part(const char *s, size_t len)
 static int lp_pushresult(lp_State *S)
 { return lua_pushlstring(S->L, S->buf, vec_len(S->buf)), 1; }
 
-static void lp_resetpr(lp_Path *pr)
-{ vec_reset(pr->parts), pr->dots = 0; }
+static void lp_resetpath(lp_Path *p)
+{ vec_reset(p->parts), p->dots = 0; }
 
-static void lp_freepr(lp_Path *pr)
-{ if (pr) vec_free(pr->parts), pr->dots = 0; }
+static void lp_freepath(lp_Path *p)
+{ if (p) vec_free(p->parts), p->dots = 0; }
 
 static int lpL_delstate(lua_State *L) {
     lp_State *S = (lp_State*)lua_touserdata(L, 1);
     if (S != NULL) {
-        lp_freepr(&S->pr);
-        lp_freepr(&S->pr1);
+        lp_freepath(&S->p);
+        lp_freepath(&S->pp);
         vec_free(S->buf);
 #ifdef _WIN32
         vec_free(S->wbuf);
@@ -200,8 +200,8 @@ static int lpL_delstate(lua_State *L) {
 }
 
 static lp_State *lp_resetstate(lp_State *S) {
-    lp_resetpr(&S->pr);
-    lp_resetpr(&S->pr1);
+    lp_resetpath(&S->p);
+    lp_resetpath(&S->pp);
     vec_reset(S->buf);
 #ifdef _WIN32
     vec_reset(S->wbuf);
@@ -306,40 +306,40 @@ static int lp_driveequal(lp_Part d1, lp_Part d2) {
     return d1.s == d1.e;
 }
 
-static void lp_joinraw(lua_State *L, const char *s, lp_Path *pr) {
+static void lp_joinraw(lua_State *L, const char *s, lp_Path *p) {
     while (*s != '\0') {
-        lp_Part *cur = vec_grow(L, pr->parts, 1);
+        lp_Part *cur = vec_grow(L, p->parts, 1);
         while (lp_isdirsep(*s)) ++s;
         cur->s = s;
         cur->e = s = lp_nextsep(s);
         if (lp_iscurdir(cur->s)) {
-            if (*cur->e == '\0') vec_rawlen(pr->parts) += 1;
+            if (*cur->e == '\0') vec_rawlen(p->parts) += 1;
             cur->e = cur->s;
         } else if (!lp_ispardir(cur->s))
-            vec_rawlen(pr->parts) += 1;
-        else if (vec_rawlen(pr->parts) > 1)
-            vec_rawlen(pr->parts) -= 1;
-        else if (pr->dots >= 0)
-            pr->dots += 1;
+            vec_rawlen(p->parts) += 1;
+        else if (vec_rawlen(p->parts) > 1)
+            vec_rawlen(p->parts) -= 1;
+        else if (p->dots >= 0)
+            p->dots += 1;
     }
 }
 
-static int lp_joinparts(lua_State *L, const char *s, lp_Path *pr) {
+static int lp_joinparts(lua_State *L, const char *s, lp_Path *p) {
     lp_Part drive;
     int root = lp_splitdrive(s, &drive);
-    if (!vec_len(pr->parts))
-        vec_push(L, pr->parts, drive);
-    else if (!lp_driveequal(pr->parts[0], drive))
-        vec_rawlen(pr->parts) = 1, pr->parts[0] = drive, pr->dots = -root;
+    if (!vec_len(p->parts))
+        vec_push(L, p->parts, drive);
+    else if (!lp_driveequal(p->parts[0], drive))
+        vec_rawlen(p->parts) = 1, p->parts[0] = drive, p->dots = -root;
     if (root) /* is absolute path? */
-        vec_rawlen(pr->parts) = 1, pr->dots = -root;
-    if (vec_rawlen(pr->parts) > 1 && lp_len(vec_rawend(pr->parts)[-1]) == 0)
-        vec_rawlen(pr->parts) -= 1;        /* remove trailing '/' */
-    if (vec_rawlen(pr->parts) > 1 && *drive.e == '\0')
-        vec_push(L, pr->parts, lp_part(drive.e, 0));  /* empty? add '/' */
+        vec_rawlen(p->parts) = 1, p->dots = -root;
+    if (vec_rawlen(p->parts) > 1 && lp_len(vec_rawend(p->parts)[-1]) == 0)
+        vec_rawlen(p->parts) -= 1;        /* remove trailing '/' */
+    if (vec_rawlen(p->parts) > 1 && *drive.e == '\0')
+        vec_push(L, p->parts, lp_part(drive.e, 0));  /* empty? add '/' */
     else  /* join path to current parts */
-        lp_joinraw(L, drive.e, pr);
-    return pr->dots;
+        lp_joinraw(L, drive.e, p);
+    return p->dots;
 }
 
 static char *lp_applydrive(lua_State *L, int sep, char **pp, lp_Part drive) {
@@ -358,14 +358,14 @@ static char *lp_applydrive(lua_State *L, int sep, char **pp, lp_Part drive) {
     return *pp;
 }
 
-static char *lp_applysepparts(lua_State *L, const char *sep, char **pp, lp_Path *pr) {
-    int i, len = vec_len(pr->parts);
+static char *lp_applysepparts(lua_State *L, const char *sep, char **pp, lp_Path *p) {
+    int i, len = vec_len(p->parts);
     if (len) {
-        lp_applydrive(L, sep[0], pp, pr->parts[0]);
-        if (pr->dots <= -2) vec_concat(L, *pp, sep);
-        if (pr->dots <= -1) vec_concat(L, *pp, sep);
-        if (pr->dots > 0) {
-            for (i = 0; i < pr->dots; ++i) {
+        lp_applydrive(L, sep[0], pp, p->parts[0]);
+        if (p->dots <= -2) vec_concat(L, *pp, sep);
+        if (p->dots <= -1) vec_concat(L, *pp, sep);
+        if (p->dots > 0) {
+            for (i = 0; i < p->dots; ++i) {
                 if (i > 0) vec_concat(L, *pp, sep);
                 vec_concat(L, *pp, LP_PARDIR);
             }
@@ -373,7 +373,7 @@ static char *lp_applysepparts(lua_State *L, const char *sep, char **pp, lp_Path 
         }
         for (i = 1; i < len; ++i) {
             if (i > 1) vec_concat(L, *pp, sep);
-            vec_extend(L, *pp, pr->parts[i].s, lp_len(pr->parts[i]));
+            vec_extend(L, *pp, p->parts[i].s, lp_len(p->parts[i]));
         }
     }
     if (vec_len(*pp) == 0) vec_push(L, *pp, LP_CURDIR[0]);
@@ -381,19 +381,19 @@ static char *lp_applysepparts(lua_State *L, const char *sep, char **pp, lp_Path 
     return *pp;
 }
 
-static char *lp_applyparts(lua_State *L, char **pp, lp_Path *pr)
-{ return lp_applysepparts(L, LP_DIRSEP, pp, pr); }
+static char *lp_applyparts(lua_State *L, char **pp, lp_Path *p)
+{ return lp_applysepparts(L, LP_DIRSEP, pp, p); }
 
-static char *lp_applyaltparts(lua_State *L, char **pp, lp_Path *pr)
-{ return lp_applysepparts(L, LP_ALTSEP, pp, pr); }
+static char *lp_applyaltparts(lua_State *L, char **pp, lp_Path *p)
+{ return lp_applysepparts(L, LP_ALTSEP, pp, p); }
 
-static lp_Part lp_name(lp_Path *pr) {
-    unsigned len = vec_len(pr->parts);
+static lp_Part lp_name(lp_Path *p) {
+    unsigned len = vec_len(p->parts);
     lp_Part *name;
-    if (len == 1 || (len == 2 && lp_len(pr->parts[1]) == 0))
-        return pr->dots > 0 ? lp_part(LP_PARDIR, sizeof(LP_PARDIR)-1)
+    if (len == 1 || (len == 2 && lp_len(p->parts[1]) == 0))
+        return p->dots > 0 ? lp_part(LP_PARDIR, sizeof(LP_PARDIR)-1)
             : lp_part(NULL, 0);
-    name = vec_rawend(pr->parts);
+    name = vec_rawend(p->parts);
     return lp_len(name[-1]) ? name[-1] : name[-2];
 }
 
@@ -404,29 +404,29 @@ static const char *lp_splitext(lp_Part name) {
     return name.s < p && p != name.e - 1 ? p : name.e;
 }
 
-static int lp_indexparts(lua_State *L, int idx, lp_Path *pr) {
-    int len = (int)vec_len(pr->parts);
-    int extra = pr->dots < 0 || (len && lp_len(pr->parts[0]));
-    len += (pr->dots > 0 ? pr->dots : 0) + extra - 1 -
-        (len && lp_len(pr->parts[len-1]) == 0);
+static int lp_indexparts(lua_State *L, int idx, lp_Path *p) {
+    int len = (int)vec_len(p->parts);
+    int extra = p->dots < 0 || (len && lp_len(p->parts[0]));
+    len += (p->dots > 0 ? p->dots : 0) + extra - 1 -
+        (len && lp_len(p->parts[len-1]) == 0);
     if (idx < 0) idx += len + 1;
     if (!(idx >= 1 && idx <= len)) return 0;
     if (extra && idx == 1) {
         luaL_Buffer B;
         const char *s;
         luaL_buffinit(L, &B);
-        for (s = pr->parts[0].s; s < pr->parts[0].e; ++s)
+        for (s = p->parts[0].s; s < p->parts[0].e; ++s)
             luaL_addchar(&B, lp_normchar(*s));
-        luaL_addstring(&B, pr->dots == -1 ?
-                LP_DIRSEP : pr->dots == -2 ? LP_DIRSEP LP_DIRSEP : "");
+        luaL_addstring(&B, p->dots == -1 ?
+                LP_DIRSEP : p->dots == -2 ? LP_DIRSEP LP_DIRSEP : "");
         luaL_pushresult(&B);
-    } else if (idx <= pr->dots)
+    } else if (idx <= p->dots)
         lua_pushstring(L, LP_PARDIR);
     else {
-        idx -= (pr->dots < 0 ? 0 : pr->dots) + extra;
-        if (idx < 0 || idx >= (int)vec_len(pr->parts))
+        idx -= (p->dots < 0 ? 0 : p->dots) + extra;
+        if (idx < 0 || idx >= (int)vec_len(p->parts))
             return lua_pushliteral(L, ""), 1;
-        lua_pushlstring(L, pr->parts[idx].s, lp_len(pr->parts[idx]));
+        lua_pushlstring(L, p->parts[idx].s, lp_len(p->parts[idx]));
     }
     return 1;
 }
@@ -435,7 +435,7 @@ static lp_State *lp_joinargs(lua_State *L, int start, int count) {
     lp_State *S = lp_getstate(L);
     int i;
     for (i = start; i <= count; ++i)
-        lp_joinparts(L, luaL_checkstring(L, i), &S->pr);
+        lp_joinparts(L, luaL_checkstring(L, i), &S->p);
     return S;
 }
 
@@ -916,13 +916,13 @@ static int lp_islink(lp_State *S, const char *s) {lpP_isattr(,REPARSE_POINT);}
 static int lp_isfile(lp_State *S, const char *s) {lpP_isattr(!,DIRECTORY);   }
 
 static int lpP_ismount(lp_State *S, const char *s) {
-    int wc, len = (int)vec_len(S->pr.parts);
-    int noparts = (len == 1 || (len == 2 && lp_len(S->pr.parts[1]) == 0));
+    int wc, len = (int)vec_len(S->p.parts);
+    int noparts = (len == 1 || (len == 2 && lp_len(S->p.parts[1]) == 0));
     LPWSTR ws;
     if (len < 1) return 0;
-    if (lp_len(S->pr.parts[0]) && lp_isdirsep(*S->pr.parts[0].s))
-        return (S->pr.dots < 0 && noparts);
-    if (S->pr.dots < 0 && noparts) return 1;
+    if (lp_len(S->p.parts[0]) && lp_isdirsep(*S->p.parts[0].s))
+        return (S->p.dots < 0 && noparts);
+    if (S->p.dots < 0 && noparts) return 1;
     ws = (lpP_addwstring(S, s),
             wc = vec_len(S->wbuf),
             vec_push(S->L, S->wbuf, 0),
@@ -936,7 +936,7 @@ static int lpP_ismount(lp_State *S, const char *s) {
 static int lp_ismount(lp_State *S, const char *s) {
     int ret;
     if ((ret = lp_abs(S, s)) != 1) return ret;
-    lp_joinparts(S->L, s = lua_tostring(S->L, -1), &lp_resetstate(S)->pr);
+    lp_joinparts(S->L, s = lua_tostring(S->L, -1), &lp_resetstate(S)->p);
     return lpP_ismount(S, s) ? 0 : lp_bool(S->L, 0);
 }
 
@@ -1091,7 +1091,7 @@ static int lpL_setenv(lua_State *L) {
 
 static int lpL_expandvars(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    LPWSTR ret = (lpP_addwstring(S, lp_applyparts(L, &S->buf, &S->pr)),
+    LPWSTR ret = (lpP_addwstring(S, lp_applyparts(L, &S->buf, &S->p)),
             vec_push(L, S->wbuf, 0),
             vec_grow(L, S->wbuf, MAX_PATH));
     DWORD  wc  = ExpandEnvironmentStringsW(S->wbuf, ret, MAX_PATH);
@@ -1439,9 +1439,9 @@ static int lp_ismount(lp_State *S, const char *s) {
     assert(s == S->buf);
     if (lstat(s, &buf1) != 0 || S_ISLNK(buf1.st_mode))
         return lp_bool(S->L, 0);
-    lp_joinparts(S->L, LP_PARDIR, &S->pr);
+    lp_joinparts(S->L, LP_PARDIR, &S->p);
     vec_reset(S->buf);
-    lp_applyparts(S->L, &S->buf, &S->pr);
+    lp_applyparts(S->L, &S->buf, &S->p);
     vec_push(S->L, S->buf, 0);
     buf = vec_grow(S->L, S->buf, PATH_MAX);
     if (realpath(S->buf, buf) == NULL || lstat(buf, &buf2) < 0) return 0;
@@ -1516,7 +1516,7 @@ static int lp_exapndvars(lua_State *L) {
 
 static int lpL_expandvars(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_applyparts(L, &S->buf, &S->pr);
+    lp_applyparts(L, &S->buf, &S->p);
 #ifdef __ANDROID__
     lua_pushnil(L);
     lua_pushstring(L, "expandvars not support on Android");
@@ -1589,8 +1589,8 @@ static int lpL_diriter(lua_State *L) {
 
 static int lp_pushdir(lp_State *S, lp_Walker *w, int limit) {
     lua_State *L = S->L;
-    if (vec_len(S->pr.parts) > 1)
-        lp_applyparts(L, &S->buf, &S->pr);
+    if (vec_len(S->p.parts) > 1)
+        lp_applyparts(L, &S->buf, &S->p);
     else
         *vec_grow(L, S->buf, 1) = 0;
     lp_initwalker(S, w, S->buf, limit);
@@ -1600,7 +1600,7 @@ static int lp_pushdir(lp_State *S, lp_Walker *w, int limit) {
         lua_setfield(L, -2, "__close");
     }
     lua_setmetatable(L, -2);
-    S->buf = NULL, lp_resetpr(&S->pr);
+    S->buf = NULL, lp_resetpath(&S->p);
     lua_pushcfunction(L, lpL_diriter);
     lua_pushvalue(L, -2);
     lua_pushnil(L);
@@ -1674,18 +1674,19 @@ static int lpL_match(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
     const char *p = luaL_checkstring(L, 2);
     unsigned i, j;
-    lp_joinparts(L, s, &S->pr), lp_joinparts(L, p, &S->pr1);
-    i = vec_rawlen(S->pr1.parts), j = vec_rawlen(S->pr.parts);
-    if (lp_len(*S->pr1.parts) != 0
-            && !lp_driveequal(*S->pr.parts, *S->pr1.parts))
+    luaL_argcheck(L, *p != '\0', 2, "empty pattern");
+    lp_joinparts(L, s, &S->p), lp_joinparts(L, p, &S->pp);
+    i = vec_rawlen(S->pp.parts), j = vec_rawlen(S->p.parts);
+    if (lp_len(*S->pp.parts) != 0
+            && !lp_driveequal(*S->p.parts, *S->pp.parts))
         return 0; /* pattern drive (if exists) must equal */
-    if (S->pr1.dots > 0) { /* has pattern '..' prefixed? */
-        if (S->pr1.dots != S->pr.dots || i != j) return 0;
-    } else if (S->pr1.dots < 0) { /* is pattern absolute? */
-        if (S->pr.dots >= 0 || i != j) return 0; /* parts must be equal */
+    if (S->pp.dots > 0) { /* has pattern '..' prefixed? */
+        if (S->pp.dots != S->p.dots || i != j) return 0;
+    } else if (S->pp.dots < 0) { /* is pattern absolute? */
+        if (S->p.dots >= 0 || i != j) return 0; /* parts must be equal */
     } else if (i > j) return 0; /* pattern parts must be less than path */
     while (--i > 0 && --j > 0)
-        if (!lp_fnmatch(S->pr.parts[j], S->pr1.parts[i])) return 0;
+        if (!lp_fnmatch(S->p.parts[j], S->pp.parts[i])) return 0;
     return lua_settop(L, 1), 1;
 }
 
@@ -1698,7 +1699,7 @@ typedef struct lp_GlobLevel {
 typedef struct lp_Glob {
     lp_Walker     w;
     char         *pat;
-    lp_Path pr;
+    lp_Path       p;               /* result path */
     lp_Part      *s, *i, *e, **ps; /* pattern stack */
     lp_GlobLevel *gls, *glc;       /* level stack, current level */
     char         *ms;              /* match stack */
@@ -1722,7 +1723,7 @@ static int lpL_globclose(lua_State *L) {
     lp_Glob *g = (lp_Glob*)luaL_checkudata(L, 1, LP_GLOB_TYPE);
     if (g->pat) {
         lp_freewalker(&g->w);
-        lp_freepr(&g->pr);
+        lp_freepath(&g->p);
         vec_free(g->pat);
     }
     return 0;
@@ -1732,12 +1733,12 @@ static void lpG_init(lp_State *S, lp_Glob *g, int limit) {
     lua_State *L = S->L;
     lp_Part *i, *j, *e, *ps = NULL;
     lp_GlobLevel gl = {NULL, 0, 0};
-    g->pat = lp_applyparts(L, &S->buf, &S->pr), S->buf = NULL;
-    lp_joinparts(L, g->pat, &g->pr);
-    i = j = g->pr.parts + 1, e = vec_rawend(g->pr.parts);
-    vec_extend(L, g->w.buf, g->pat, lp_len(g->pr.parts[0]));
+    g->pat = lp_applyparts(L, &S->buf, &S->p), S->buf = NULL;
+    lp_joinparts(L, g->pat, &g->p);
+    i = j = g->p.parts + 1, e = vec_rawend(g->p.parts);
+    vec_extend(L, g->w.buf, g->pat, lp_len(g->p.parts[0]));
     for (; i < e && !lpG_ismagic(*i); ++i) {
-        if (i > j || g->pr.dots < 0) vec_push(L, g->w.buf, LP_DIRSEP[0]);
+        if (i > j || g->p.dots < 0) vec_push(L, g->w.buf, LP_DIRSEP[0]);
         vec_extend(L, g->w.buf, i->s, lp_len(*i));
     }
     *vec_grow(L, g->w.buf, 1) = 0;
@@ -1860,7 +1861,7 @@ static int lp_dirop(lua_State* L, lp_DirOper *f, void *ud) {
     lp_DirOp dirop;
     int ret;
     dirop.count = 0, dirop.f = f, dirop.ud = ud;
-    lp_initwalker(S, &dirop.w, lp_applyparts(L, &S->buf, &S->pr), -1);
+    lp_initwalker(S, &dirop.w, lp_applyparts(L, &S->buf, &S->p), -1);
     S->buf = NULL;
     lua_pushcfunction(L, lp_dirop_walker);
     lua_pushlightuserdata(L, &dirop);
@@ -1872,7 +1873,7 @@ static int lp_dirop(lua_State* L, lp_DirOper *f, void *ud) {
 
 #define lp_routine(L,f)                                   do { \
     lp_State* S = lp_joinargs(L, 1, lua_gettop(L));            \
-    int ret = f(S, lp_applyparts(L, &S->buf, &S->pr));         \
+    int ret = f(S, lp_applyparts(L, &S->buf, &S->p));         \
     return ret ? (ret < 0 ? -ret : ret) : lp_pushresult(S);  } while (0)
 
 static int lpL_resolve(lua_State *L)  { lp_routine(L, lp_realpath); }
@@ -1902,7 +1903,7 @@ static int lpL_remove(lua_State* L) { lp_routine(L, lp_remove); }
 
 static int lpL_abs(lua_State* L) {
     lp_State* S = lp_joinargs(L, 1, lua_gettop(L));
-    return lp_abs(S, lp_applyparts(L, &S->buf, &S->pr));
+    return lp_abs(S, lp_applyparts(L, &S->buf, &S->p));
 }
 
 static int lp_rel(lp_State *S, const char *p, const char *s) {
@@ -1938,23 +1939,23 @@ static int lpL_rel(lua_State *L) {
     if ((ret = lp_abs(lp_resetstate(S), s)) < 0) return -ret;
     if (lp_rel(S, lua_tostring(L, -1), start) == 0) {
         lp_resetstate(S);
-        lp_joinparts(L, s, &S->pr);
-        lp_applyparts(L, &S->buf, &S->pr);
+        lp_joinparts(L, s, &S->p);
+        lp_applyparts(L, &S->buf, &S->p);
         return lp_pushresult(S);
     }
     return 1;
 }
 
 static int lp_delparts(lua_State *L) {
-    lp_Path *pr = luaL_testudata(L, 1, LP_PARTS_ITER);
-    lp_freepr(pr);
+    lp_Path *p = luaL_testudata(L, 1, LP_PARTS_ITER);
+    lp_freepath(p);
     return 0;
 }
 
 static int lp_iterparts(lua_State *L) {
-    lp_Path *pr = luaL_checkudata(L, 1, LP_PARTS_ITER);
+    lp_Path *p = luaL_checkudata(L, 1, LP_PARTS_ITER);
     int idx = (int)luaL_optinteger(L, 2, 0) + 1;
-    if (lp_indexparts(L, idx, pr) == 0)
+    if (lp_indexparts(L, idx, p) == 0)
         return 0;
     lua_pushinteger(L, idx);
     lua_insert(L, -2);
@@ -1962,8 +1963,8 @@ static int lp_iterparts(lua_State *L) {
 }
 
 static int lp_newpartsiter(lua_State *L) {
-    lp_Path *pr = lua_newuserdata(L, sizeof(lp_Path));
-    memset(pr, 0, sizeof(*pr));
+    lp_Path *p = lua_newuserdata(L, sizeof(lp_Path));
+    memset(p, 0, sizeof(*p));
     if (!luaL_newmetatable(L, LP_PARTS_ITER)) {
         lua_pushcfunction(L, lp_delparts);
         lua_pushvalue(L, -1);
@@ -1971,7 +1972,7 @@ static int lp_newpartsiter(lua_State *L) {
         lua_setfield(L, -2, "__close");
     }
     lua_setmetatable(L, -2);
-    lp_joinparts(L, lua_tostring(L, -2), pr);
+    lp_joinparts(L, lua_tostring(L, -2), p);
     lua_pushvalue(L, -2);
     lua_setuservalue(L, -2);
     lua_pushcfunction(L, lp_iterparts);
@@ -1984,53 +1985,53 @@ static int lpL_parts(lua_State *L) {
     int isint, idx = (int)lua_tointegerx(L, -1, &isint);
     int i, top = lua_gettop(L) - isint;
     for (i = 1; i <= top; ++i)
-        lp_joinparts(L, luaL_checkstring(L, i), &S->pr);
-    if (isint) return lp_indexparts(L, idx, &S->pr);
-    lp_applyparts(L, &S->buf, &S->pr), lp_pushresult(S);
+        lp_joinparts(L, luaL_checkstring(L, i), &S->p);
+    if (isint) return lp_indexparts(L, idx, &S->p);
+    lp_applyparts(L, &S->buf, &S->p), lp_pushresult(S);
     return lp_newpartsiter(L);
 }
 
 static int lpL_drive(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    return lp_applydrive(L, LP_DIRSEP[0], &S->buf, S->pr.parts[0]), lp_pushresult(S);
+    return lp_applydrive(L, LP_DIRSEP[0], &S->buf, S->p.parts[0]), lp_pushresult(S);
 }
 
 static int lpL_root(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    return lua_pushstring(L, S->pr.dots == -1 ?
-            LP_DIRSEP : S->pr.dots == -2 ? LP_DIRSEP LP_DIRSEP : ""), 1;
+    return lua_pushstring(L, S->p.dots == -1 ?
+            LP_DIRSEP : S->p.dots == -2 ? LP_DIRSEP LP_DIRSEP : ""), 1;
 }
 
 static int lpL_anchor(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_applydrive(L, LP_DIRSEP[0], &S->buf, S->pr.parts[0]);
-    vec_concat(L, S->buf, S->pr.dots == -1 ?
-            LP_DIRSEP : S->pr.dots == -2 ? LP_DIRSEP LP_DIRSEP : "");
+    lp_applydrive(L, LP_DIRSEP[0], &S->buf, S->p.parts[0]);
+    vec_concat(L, S->buf, S->p.dots == -1 ?
+            LP_DIRSEP : S->p.dots == -2 ? LP_DIRSEP LP_DIRSEP : "");
     return lp_pushresult(S);
 }
 
 static int lpL_parent(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_joinparts(L, LP_PARDIR, &S->pr);
-    return lp_applyparts(L, &S->buf, &S->pr), lp_pushresult(S);
+    lp_joinparts(L, LP_PARDIR, &S->p);
+    return lp_applyparts(L, &S->buf, &S->p), lp_pushresult(S);
 }
 
 static int lpL_name(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_Part name = lp_name(&S->pr);
+    lp_Part name = lp_name(&S->p);
     return lua_pushlstring(L, name.s, lp_len(name)), 1;
 }
 
 static int lpL_stem(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_Part name = lp_name(&S->pr);
+    lp_Part name = lp_name(&S->p);
     const char *ext = lp_splitext(name);
     return lua_pushlstring(L, name.s, ext - name.s), 1;
 }
 
 static int lpL_suffix(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_Part name = lp_name(&S->pr);
+    lp_Part name = lp_name(&S->p);
     const char *ext = lp_splitext(name);
     return lua_pushlstring(L, ext, name.e - ext), 1;
 }
@@ -2052,7 +2053,7 @@ static int lp_itersuffixes(lua_State *L) {
 
 static int lpL_suffixes(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    lp_Part name = lp_name(&S->pr);
+    lp_Part name = lp_name(&S->p);
     const char *ext = name.s < name.e && name.e[-1] == LP_EXTSEP[0] ?
         name.e : name.s;
     if (ext) {
@@ -2067,12 +2068,12 @@ static int lpL_suffixes(lua_State *L) {
 
 static int lpL_alt(lua_State *L) {
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L));
-    return lua_pushstring(L, lp_applyaltparts(L, &S->buf, &S->pr)), 1;
+    return lua_pushstring(L, lp_applyaltparts(L, &S->buf, &S->p)), 1;
 }
 
 static int lpL_libcall(lua_State *L) {
     lp_State *S = lp_joinargs(L, 2, lua_gettop(L));
-    return lua_pushstring(L, lp_applyparts(L, &S->buf, &S->pr)), 1;
+    return lua_pushstring(L, lp_applyparts(L, &S->buf, &S->p)), 1;
 }
 
 /* entry */
