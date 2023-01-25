@@ -712,15 +712,15 @@ function _G.test_env()
       eq(env.get "FOO", "BAR")
       eq(env.expand "abc%FOO%abc", "abcBARabc")
    else
-      if env.get "FOO" then
-         env.set("FOO", nil)
-      end
       eq(env.get "FOO", nil)
       eq(env.set("FOO", "BAR"), "BAR")
       eq(env.get "FOO", "BAR")
       eq(env.expand "abc${FOO}abc", "abcBARabc")
       fail(".-syntax error.*",
          function() assert(env.expand("$(ls /")) end)
+      if env.get "FOO" then
+         env.set("FOO", nil)
+      end
    end
 end
 

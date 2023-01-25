@@ -1225,8 +1225,8 @@ static int lpW_file(lua_State *L, lp_Walker *w) {
     if (vec_len(w->levels) == 0) return 0;
     top = vec_rawend(w->levels) - 1;
     errno = 0;
-    if (!(ent = readdir(vec_rawend(w->levels)[-1].dir)) && errno)
-        return lp_pusherror(L, "walknext", w->buf);
+    ent = readdir(vec_rawend(w->levels)[-1].dir);
+    if (!ent && errno) return lp_pusherror(L, "walknext", w->buf);
     if (ent == NULL) return LP_WALKOUT;
     if (strcmp(ent->d_name, LP_CURDIR) == 0
             || strcmp(ent->d_name, LP_PARDIR) == 0)
@@ -1243,8 +1243,8 @@ static int lpW_file(lua_State *L, lp_Walker *w) {
 static int lpL_getcwd(lua_State *L) {
     lp_State *S = lp_getstate(L);
     char *ret = vec_grow(L, S->buf, PATH_MAX);
-    if (getcwd(ret, PATH_MAX) == NULL)
-        return -lp_pusherror(L, "getcwd", NULL);
+    ret = getcwd(ret, PATH_MAX);
+    if (ret == NULL) return -lp_pusherror(L, "getcwd", NULL);
     lua_pushstring(L, ret);
     return 1;
 }
@@ -1258,12 +1258,12 @@ static int lpL_binpath(lua_State *L) {
     lp_State *S = lp_getstate(L);
 #ifdef __APPLE__
     char *ret = vec_grow(L, S->buf, PROC_PIDPATHINFO_MAXSIZE);
-    if (proc_pidpath(getpid(), ret, PROC_PIDPATHINFO_MAXSIZE) < 0)
-        return -lp_pusherror(L, "binpath", NULL);
+    int r = proc_pidpath(getpid(), ret, PROC_PIDPATHINFO_MAXSIZE);
+    if (r < 0) return -lp_pusherror(L, "binpath", NULL);
 #else
     char *ret = vec_grow(L, S->buf, PATH_MAX);
-    if (readlink("/proc/self/exe", ret, PATH_MAX) < 0)
-        return -lp_pusherror(L, "binpath", NULL);
+    int r = readlink("/proc/self/exe", ret, PATH_MAX);
+    if (r < 0) return -lp_pusherror(L, "binpath", NULL);
 #endif
     return lua_pushstring(L, ret), 1;
 #endif
@@ -1290,8 +1290,8 @@ static int lp_chdir(lp_State *S, const char *s)
 { return chdir(s) ? lp_pusherror(S->L, "chdir", s) : 0; }
 
 static int lp_mkdir(lp_State *S, const char *s) {
-    return (mkdir(s, 0777) != 0 && errno != EEXIST) ?
-        lp_pusherror(S->L, "mkdir", s) : 0;
+    int r = mkdir(s, 0777);
+    return (r != 0 && errno != EEXIST) ? lp_pusherror(S->L, "mkdir", s) : 0;
 }
 
 static int lp_rmdir(lp_State *S, const char *s)
@@ -1302,10 +1302,11 @@ static int lp_makedirs(lp_State *S, char *s) {
     size_t i = (lp_splitdrive(s, &drive), drive.e - s) + 1;
     size_t len = (s == S->buf ? vec_len(s) : strlen(s));
     for (; i <= len; ++i) {
+        int r;
         while (i < len && !lp_isdirsep(s[i])) ++i;
         s[i] = 0;
-        if (mkdir(s, 0777) != 0 && errno != EEXIST)
-            return lp_pusherror(S->L, "makedirs", s);
+        r = (mkdir(s, 0777) != 0);
+        if (r && errno != EEXIST) return lp_pusherror(S->L, "makedirs", s);
         if (i != len) s[i] = LP_DIRSEP[0];
     }
     return 0;
@@ -1313,22 +1314,25 @@ static int lp_makedirs(lp_State *S, char *s) {
 
 static int lp_removedirs(lp_State *S, lp_Walker *w, int *pcount, void *ud) {
     (void)ud;
-    if (w->state == LP_WALKFILE)
-        return ++*pcount, remove(w->buf) == 0 ?
-            0 : lp_pusherror(S->L, "remove", w->buf);
-    if (w->state == LP_WALKDIR || w->state == LP_WALKOUT)
-        return ++*pcount, rmdir(w->buf) == 0 ?
-            0 : lp_pusherror(S->L, "rmdir", w->buf);
+    if (w->state == LP_WALKFILE) {
+        int r = remove(w->buf) == 0;
+        return ++*pcount, r ? 0 : lp_pusherror(S->L, "remove", w->buf);
+    }
+    if (w->state == LP_WALKDIR || w->state == LP_WALKOUT) {
+        int r = rmdir(w->buf) == 0;
+        return ++*pcount, r ? 0 : lp_pusherror(S->L, "rmdir", w->buf);
+    }
     return 0;
 }
 
 static int lp_unlockdirs(lp_State *S, lp_Walker *w, int *pcount, void *ud) {
     struct stat buf;
     (void)ud;
-    if (w->state == LP_WALKFILE)
-        return ++*pcount, stat(w->buf, &buf) == 0
-            && chmod(w->buf, buf.st_mode | S_IWUSR) == 0 ?
-            0 : lp_pusherror(S->L, "unlock", w->buf);
+    if (w->state == LP_WALKFILE) {
+        int r = stat(w->buf, &buf) == 0
+            && chmod(w->buf, buf.st_mode | S_IWUSR) == 0;
+        return ++*pcount, r ? 0 : lp_pusherror(S->L, "unlock", w->buf);
+    }
     return 0;
 }
 
@@ -1342,8 +1346,7 @@ static int lpL_tmpdir(lua_State* L) {
         lua_settop(L, 2);
         lua_pushfstring(L, "%s%s%d/", s, prefix, magic);
     } while (stat(dir = lua_tostring(L, -1), &buf) == 0);
-    if (mkdir(dir, 0777) != 0)
-        return -lp_pusherror(L, "tmpdir", dir);
+    if (mkdir(dir, 0777) != 0) return -lp_pusherror(L, "tmpdir", dir);
     return 1;
 }
 
@@ -1365,9 +1368,8 @@ static int lpL_touch(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
     struct utimbuf utb, *buf;
     int fh = open(s, O_WRONLY|O_CREAT, 0644), err = errno;
-    close(fh);
-    if (fh < 0 && err != EISDIR)
-        return errno = err, -lp_pusherror(L, "touch", s);
+    if (fh >= 0) close(fh);
+    else if (err!=EISDIR) return errno=err, -lp_pusherror(L, "touch", s);
     if (lua_gettop(L) == 1) /* set to current date/time */
         buf = NULL;
     else {
@@ -1393,16 +1395,13 @@ static int lpL_copy(lua_State *L) {
     lua_Integer mode = luaL_optinteger(L, 4, 0644);
     char *buf = vec_grow(L, S->buf, BUFSIZ);
     size_t size;
-    int source, dest;
-    if ((source = open(from, O_RDONLY, 0)) < 0)
-        return -lp_pusherror(L, "open", from);
+    int dest, source = open(from, O_RDONLY, 0);
+    if (source < 0) return -lp_pusherror(L, "open", from);
     dest = open(to, O_WRONLY|O_CREAT|(excl ? O_EXCL : O_TRUNC), mode);
     if (dest < 0) return -lp_pusherror(L, "open", to);
     while ((size = read(source, buf, BUFSIZ)) > 0) {
-        if (write(dest, buf, size) < 0) {
-            close(source), close(dest);
-            return -lp_pusherror(L, "write", to);
-        }
+        int r = write(dest, buf, size)<0 ? (close(source),close(dest),1) : 0;
+        if (r) return -lp_pusherror(L, "write", to);
     }
     close(source), close(dest);
     return lp_bool(L, 1);
@@ -1462,10 +1461,8 @@ static int lp_atime(lp_State *S, const char *s) { lp_time(L, atime); }
 
 static int lpL_uname(lua_State *L) {
     struct utsname buf;
-    if (uname(&buf) != 0) {
-        lua_pushstring(L, LP_PLATFORM);
-        return -lp_pusherror(L, "platform", NULL);
-    }
+    int r = uname(&buf);
+    if (r != 0) return -lp_pusherror(L, "platform", NULL);
     lua_pushstring(L, buf.sysname);
     lua_pushstring(L, buf.nodename);
     lua_pushstring(L, buf.release);
@@ -1488,11 +1485,11 @@ static int lpL_setenv(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     const char *value = luaL_optstring(L, 2, NULL);
     if (value == NULL) {
-        return unsetenv(name) == 0 ? (lua_settop(L, 2), 1) :
-            -lp_pusherror(L, "unsetenv", NULL);
+        int r = unsetenv(name);
+        return r ? -lp_pusherror(L, "unsetenv", NULL) : (lua_settop(L, 2), 1);
     }
-    return setenv(name, value, 1) == 0 ? (lua_settop(L, 2), 1) :
-        -lp_pusherror(L, "setenv", NULL);
+    return setenv(name, value, 1) == 0 ?
+        (lua_settop(L, 2), 1) : -lp_pusherror(L, "setenv", NULL);
 }
 
 #if !defined(__ANDROID__) && (!defined(__APPLE__) || defined(TARGET_OS_OSX))
@@ -1677,9 +1674,8 @@ static int lpL_match(lua_State *L) {
     luaL_argcheck(L, *p != '\0', 2, "empty pattern");
     lp_joinparts(L, s, &S->p), lp_joinparts(L, p, &S->pp);
     i = vec_rawlen(S->pp.parts), j = vec_rawlen(S->p.parts);
-    if (lp_len(*S->pp.parts) != 0
-            && !lp_driveequal(*S->p.parts, *S->pp.parts))
-        return 0; /* pattern drive (if exists) must equal */
+    if (lp_len(*S->pp.parts) != 0 /* pattern drive (if exists) must equal */
+            && !lp_driveequal(*S->p.parts, *S->pp.parts)) return 0;
     if (S->pp.dots > 0) { /* has pattern '..' prefixed? */
         if (S->pp.dots != S->p.dots || i != j) return 0;
     } else if (S->pp.dots < 0) { /* is pattern absolute? */
@@ -1922,8 +1918,8 @@ static int lp_rel(lp_State *S, const char *p, const char *s) {
     const char *pp = (lp_splitdrive(p, &pd), pd.e);
     const char *sp = (lp_splitdrive(s, &sd), sd.e);
     int i, dots = 0;
-    if (!lp_driveequal(pd, sd))
-        return 0;              /* return original path when drive differ */
+    /* return original when drive differs */
+    if (!lp_driveequal(pd, sd)) return 0;
     while (*pp != '\0' && *sp != '\0' && lp_charequal(*sp, *pp))
         ++pp, ++sp;                               /* find common prefix, */
     if (*pp == '\0' && *sp == '\0')      /* return '.' when all the same */

@@ -1,6 +1,6 @@
 lpath - Path utils for Lua
 ==========================
-[![CI](https://github.com/starwing/lpath/actions/workflows/test.yml/badge.svg)](https://github.com/starwing/lpath/actions/workflows/test.yml)[![Coverage Status](https://coveralls.io/repos/github/starwing/lpath/badge.svg?branch=v0.3)](https://coveralls.io/github/starwing/lpath?branch=v0.3)
+[![CI](https://github.com/starwing/lpath/actions/workflows/test.yml/badge.svg)](https://github.com/starwing/lpath/actions/workflows/test.yml)[![Coverage Status](https://coveralls.io/repos/github/starwing/lpath/badge.svg?branch=master)](https://coveralls.io/github/starwing/lpath?branch=master)
 
 `lpath` is a [lfs](http://keplerproject.github.io/luafilesystem/)-like Lua module to handle path, file system and file informations.
 
