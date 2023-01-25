@@ -24,11 +24,15 @@ local dir_table = {
 }
 
 local glob_tree = {
+   "top.txt",
    test_glob = {
+      "test.txt",
       case_1 = {
+         "case1.txt",
          a = { a = { a = { a = { c = { a = { "a", "b" } } } } } },
       },
       case_2 = {
+         "case2.txt",
          a = { a = { a = { a = { a = { a = { "b" } } } } } },
       }
    }
@@ -945,23 +949,24 @@ function _G.test_dir()
       for n in ... do
          t[#t+1] = n
       end
+      table.sort(t)
       table_eq(t, r)
    end
    maketree(glob_tree)
    assert(fs.chdir "test_glob")
-   test_table({'case_1', 'case_2'}, fs.dir())
+   test_table({'case_1', 'case_2', 'test.txt'}, fs.dir())
    for _, state in fs.dir() do
       if state == "dir" then break end
    end
    if info.platform == 'windows' then
       test_table({'.\\case_1', '.\\case_2'}, fs.dir'.')
    else
-      test_table({'./case_1', './case_2'}, fs.dir'.')
+      test_table({'./case_1', './case_2', './test.txt'}, fs.dir'.')
    end
 
-   test_count(33, fs.scandir())
-   test_count(4, fs.scandir(1))
-   test_count(8, fs.scandir(2))
+   test_count(36, fs.scandir())
+   test_count(5, fs.scandir(1))
+   test_count(11, fs.scandir(2))
 
    assert(fs.mkdir "../test_deep")
    assert(fs.chdir "../test_deep")
@@ -1080,26 +1085,44 @@ end
 in_tmpdir "test_attr"
 
 function _G.test_glob()
-   local function test_count(n, ...)
-      local count = 0
-      for _ in ... do
-         count = count + 1
+   local function check(path, r)
+      local t = {}
+      for fn in fs.glob(path) do
+         t[#t+1] = fn
       end
-      eq(count, n)
+      table.sort(t)
+      table_eq(t, r)
+   end
+   local function check_count(path, r)
+      local match = {}
+      for fn, ty in fs.glob(path) do
+         match[ty] = (match[ty] or 0) + 1
+      end
+      table_eq(match, r)
    end
    maketree(glob_tree)
-   test_count(1, fs.glob())
-   test_count(1, fs.glob "")
-   test_count(1, fs.glob "**")
-   test_count(1, fs.glob "test_glob")
-   test_count(1, fs.glob "test_glob/")
-   test_count(0, fs.glob "test_glob/case_1/**/a/a/a/b")
-   test_count(1, fs.glob "test_glob/case_2/**/a/a/a/b")
-   test_count(2, fs.glob "test_glob/**/a/b")
-   test_count(2, fs.glob "test_glob/**/a/a/**/a/b")
-   test_count(10, fs.glob "test_glob/case_1/**/a/")
-   test_count(11, fs.glob "test_glob/case_1/**/a")
-   test_count(31, fs.glob "test_glob/*")
+   fail(".*Unacceptable pattern: ''.*", function()
+      fs.glob()
+   end)
+   fail(".*Unacceptable pattern: ''.*", function()
+      fs.glob ""
+   end)
+   check("*.txt", {"top.txt"})
+   check("test_glob", {"test_glob"})
+   check("test_glob/", {"test_glob/"})
+   check("top.txt/", {})
+   check_count("**", {["in"]=16, out=16})
+   check_count("**/*.txt", {file=4})
+   check_count("test_glob/*/a", {dir=2})
+   check_count("test_glob/**/a/a/**/b", {file=2})
+   check_count("test_glob/**/a/**/c/**/b", {file=1})
+   check_count("test_glob/case_1/**/a/a/a/b", {})
+   check_count("test_glob/case_2/**/a/a/a/b", {file=1})
+   check_count("test_glob/**/a/b", {file=2})
+   check_count("test_glob/**/a/a/**/a/b", {file=2})
+   check_count("test_glob/case_1/**/a/", {["in"]=5, out=5})
+   check_count("test_glob/case_1/**/a", {file=1, ["in"]=5, out=5})
+   check_count("test_glob/*", {file=1, dir=2})
 
    -- print(("="):rep(78))
    -- for f, type in fs.glob "**/*" do

@@ -327,7 +327,7 @@ static void lp_joinraw(lua_State *L, const char *s, lp_Path *p) {
 static int lp_joinparts(lua_State *L, const char *s, lp_Path *p) {
     lp_Part drive;
     int root = lp_splitdrive(s, &drive);
-    if (!vec_len(p->parts))
+    if (vec_len(p->parts) == 0)
         vec_push(L, p->parts, drive);
     else if (!lp_driveequal(p->parts[0], drive))
         vec_rawlen(p->parts) = 1, p->parts[0] = drive, p->dots = -root;
@@ -1553,7 +1553,7 @@ static int lp_walknext(lua_State *L, lp_Walker *w) {
     for (;;) {
         int r;
         if (w->state == LP_WALKOUT && vec_len(w->levels) == 0) return 0;
-        if (w->state == LP_WALKIN && (r = lpW_in(L, w)) < 0)  return r;
+        if (w->state == LP_WALKIN && (r = lpW_in(L, w)) < 0)   return r;
         switch (w->state = lpW_file(L, w)) {
         case LP_WALKOUT: if ((r = lpW_out(L, w)) < 0) return r; break;
         case LP_WALKSYS: continue; /* '.' or '..' */
@@ -1691,19 +1691,19 @@ static int lpL_match(lua_State *L) {
 }
 
 typedef struct lp_GlobLevel {
-    lp_Part *dstar; /* '**' location */
-    int      match;
-    int      level;
+    lp_Part *pat;   /* parts after '**' */
+    int      len;   /* parts length */
+    int      start; /* current match start level */
+    int      match; /* current matched parts index, ==len -> complete match */
 } lp_GlobLevel;
 
 typedef struct lp_Glob {
     lp_Walker     w;
-    char         *pat;
-    lp_Path       p;               /* result path */
-    lp_Part      *s, *i, *e, **ps; /* pattern stack */
-    lp_GlobLevel *gls, *glc;       /* level stack, current level */
-    char         *ms;              /* match stack */
-    char          dironly;
+    lp_Path       p;               /* pattern path */
+    char         *pat;             /* pattern buffer */
+    lp_GlobLevel *stack;           /* '**' stack */
+    lp_GlobLevel *current;         /* current level */
+    char          dironly;         /* only match dir */
 } lp_Glob;
 
 static int lpG_ismagic(lp_Part p) {
@@ -1714,7 +1714,8 @@ static int lpG_ismagic(lp_Part p) {
 
 static lp_Part lpG_part(lp_Glob *g, unsigned idx) {
     lp_WalkLevel *wp = g->w.levels;
-    size_t pos = wp[idx].pos, end = idx+1 < vec_rawlen(wp) ?
+    size_t pos = (assert(idx < vec_len(g->w.levels)), wp[idx].pos);
+    size_t end = idx+1 < vec_rawlen(wp) ?
         wp[idx+1].pos-1 : vec_rawlen(g->w.buf);
     return lp_part(g->w.buf + pos, (size_t)end - pos);
 }
@@ -1724,6 +1725,7 @@ static int lpL_globclose(lua_State *L) {
     if (g->pat) {
         lp_freewalker(&g->w);
         lp_freepath(&g->p);
+        vec_free(g->stack);
         vec_free(g->pat);
     }
     return 0;
@@ -1731,75 +1733,78 @@ static int lpL_globclose(lua_State *L) {
 
 static void lpG_init(lp_State *S, lp_Glob *g, int limit) {
     lua_State *L = S->L;
-    lp_Part *i, *j, *e, *ps = NULL;
-    lp_GlobLevel gl = {NULL, 0, 0};
+    lp_Part *i, *s, *e, *ps;
+    lp_GlobLevel gl = {NULL, 0, 0, 0};
     g->pat = lp_applyparts(L, &S->buf, &S->p), S->buf = NULL;
     lp_joinparts(L, g->pat, &g->p);
-    i = j = g->p.parts + 1, e = vec_rawend(g->p.parts);
+    s = &g->p.parts[1], e = vec_rawend(g->p.parts);
     vec_extend(L, g->w.buf, g->pat, lp_len(g->p.parts[0]));
-    for (; i < e && !lpG_ismagic(*i); ++i) {
-        if (i > j || g->p.dots < 0) vec_push(L, g->w.buf, LP_DIRSEP[0]);
+    for (i = s; i < e && !lpG_ismagic(*i); ++i) {
+        if (i > s || g->p.dots < 0) vec_push(L, g->w.buf, LP_DIRSEP[0]);
         vec_extend(L, g->w.buf, i->s, lp_len(*i));
     }
     *vec_grow(L, g->w.buf, 1) = 0;
-    vec_push(L, g->gls, gl);
-    for (g->s = g->i = j = i; i < e; ++i) {
-        if (lp_len(*i) != 2 || i->s[0] != '*' || i->s[1] != '*')
-            { *j++ = *i; continue; }
-        if (ps != i-1) gl.dstar = j, *j++ = *i, vec_push(L, g->gls, gl);
-        ps = i;
+    lp_initwalker(S, &g->w, g->w.buf, limit);
+    if (i == e) return;
+    for (s = ps = i; i < e; ++i) {
+        if (lp_len(*i) != 2 || i->s[0] != '*' || i->s[1] != '*') continue;
+        if (i == s || i != ps) /* first, or not empty */
+            gl.pat = ps, gl.len = (i-ps), vec_push(L, g->stack, gl);
+        ps = i + 1; /* ps points to pattern next to '**' */
     }
-    if (lp_len(j[-1]) == 0) g->dironly = 1, --j; /* remove trailing '/' */
-    if (j == gl.dstar+1) --j;                   /* remove trailing '**' */
-    gl.dstar = g->e = j;
-    if (g->s > j) g->s = g->i = j;
-    vec_push(L, g->gls, gl), g->glc = g->gls;
-    lp_initwalker(S, &g->w, g->w.buf, g->s < g->e ? limit : 0);
+    if (lp_len(i[-1]) == 0) i -= 1, g->dironly = 1;
+    gl.pat = ps, gl.len = (i-ps), vec_push(L, g->stack, gl);
+    g->current = (assert(vec_len(g->stack) >= 1), &g->stack[0]);
 }
 
-static int lpG_match(lp_Glob *g) {
-    int match, match_end, idx = 0, end = vec_rawlen(g->w.levels), len;
-    lp_Part *p, *pe;
-    if (g->i < g->e && g->i == g->glc[1].dstar) {
-        (++g->glc)->level = g->w.limit + 1 + (g->w.state == LP_WALKIN);
-        g->glc->match = (end ? end - 1 : 0), ++g->i;
+static int lpG_match(lp_Glob *g, int level, int r);
+
+static int lpG_matchcurrent(lp_Glob *g, lp_GlobLevel *cur) {
+    int level = (int)vec_len(g->w.levels);
+    if (cur->start+cur->match >= level) cur->match = level-cur->start-1;
+    for (; cur->match < cur->len; ++cur->match) {
+        int r = lp_fnmatch(lpG_part(g, cur->start+cur->match),
+                cur->pat[cur->match]);
+        if (!r) return 0;
     }
-    if (g->i == g->e) g->i = g->e - 1; /* restore last success match */
-    if (lp_fnmatch(lpG_part(g, end-1), *g->i)) return ++g->i, 1;
-    if (g->glc->dstar == NULL)                 return 0;
-    len = (int)((pe = g->glc[1].dstar) - g->glc[0].dstar - 1);
-    if ((match_end = end - len + 1) - (match = g->glc->match + 1) > len)
-        match = match_end - len;
-    if (match_end < match)
-        match = g->glc->match = (end ? end - 1 : 0);
-    if (match == end-1)  return 0; /* avoid duplicate match */
-    for (; match < match_end; ++match) {
-        idx = match, p = g->glc->dstar + 1;
-        for (; idx < end && p < pe; ++p, ++idx)
-            if (!lp_fnmatch(lpG_part(g, idx), *p)) break;
-        if (idx+1 >= end) return g->glc->match = match, g->i = p, idx == end;
-    }
-    g->i = g->glc->dstar + 1;
-    return 0;
+    return 1;
 }
 
-static int lpG_glob1(lua_State *L, lp_Glob *g, int res) {
-    int r = (res == LP_WALKOUT) ? 0 : lpG_match(g);
-    switch (res) {
-    case LP_WALKIN:
-        if (!r && !g->glc->dstar) return --g->w.limit, g->w.state = LP_WALKDIR, 0;
-        vec_push(L, g->ps, g->i);
-        vec_push(L, g->ms, r && g->i == g->e);
-        return vec_rawend(g->ms)[-1];
-    case LP_WALKFILE:
-        return r && g->i == g->e && !g->dironly;
-    case LP_WALKDIR:
-        return r && g->i == g->e;
-    case LP_WALKOUT:
-        if ((int)vec_rawlen(g->w.levels) == 0) return 0;
-        g->i = (--vec_rawlen(g->ps), *vec_rawend(g->ps));
-        if (g->w.limit == g->glc->level) --g->glc;
-        return (--vec_rawlen(g->ms), *vec_rawend(g->ms));
+static int lpG_matchstart(lp_Glob *g, int level, int r) {
+    lp_GlobLevel *cur = g->current;
+    if (cur->len == 0) {
+        g->current += 1;
+        g->current->start = cur->start + cur->len;
+        g->current->match = 0;
+        return lpG_match(g, level, r);
+    }
+    if (level < cur->len) return 0;
+    if (vec_rawlen(g->stack) == 1 && level == cur->len && r == LP_WALKIN)
+        g->w.state = LP_WALKDIR;
+    return lpG_matchcurrent(g, cur);
+}
+
+static int lpG_match(lp_Glob *g, int level, int r) {
+    lp_GlobLevel *cur = g->current;
+    int start, islast = (cur+1 == vec_rawend(g->stack));
+    if (cur == g->stack) return lpG_matchstart(g, level, r);
+    start = g->current[-1].start + g->current[-1].len;
+    if (level < start) /* back to previous match */
+        return g->current -= 1, lpG_match(g, level, r);
+    if (islast && cur->len == 0) /* ends with '**' */
+        return r != LP_WALKFILE;
+    if (level < start+cur->len) /* has not enough room to match */
+        return 0;
+    if (cur->start != level - cur->len) {
+        cur->start = level - cur->len;
+        cur->match = 0;
+    }
+    if (lpG_matchcurrent(g, cur)) {
+        if (islast) return !g->dironly || r != LP_WALKFILE;
+        g->current += 1;
+        g->current->start = cur->start + cur->len;
+        g->current->match = 0;
+        return lpG_match(g, level, r);
     }
     return 0;
 }
@@ -1807,18 +1812,24 @@ static int lpG_glob1(lua_State *L, lp_Glob *g, int res) {
 static int lpL_globiter(lua_State *L) {
     lp_Glob *g = luaL_checkudata(L, 1, LP_GLOB_TYPE);
     for (;;) {
-        int res = lp_walknext(L, &g->w);
-        if (res <= 0) return res ? lua_error(L) : 0;
-        if (g->s == g->e) return lp_pushdirresult(L, &g->w); /* not glob */
-        if (res == LP_WALKIN && vec_len(g->w.levels) == 0) continue;
-        if (lpG_glob1(L, g, res)) return lp_pushdirresult(L, &g->w);
+        int r = lp_walknext(L, &g->w);
+        int level = (int)vec_len(g->w.levels);
+        if (r <= 0) return r ? lua_error(L) : 0;
+        if (vec_len(g->stack) == 0) {
+            if (r == LP_WALKIN) g->w.state = LP_WALKDIR;
+            assert(r==LP_WALKIN || r==LP_WALKFILE || r==LP_WALKDIR); 
+            return lp_pushdirresult(L, &g->w);
+        }
+        if (lpG_match(g, level, r)) return lp_pushdirresult(L, &g->w);
     }
 }
 
 static int lpL_glob(lua_State *L) {
     int isint, limit = (int)lua_tointegerx(L, -1, &isint);
     lp_State *S = lp_joinargs(L, 1, lua_gettop(L) - isint);
-    lp_Glob *g = lua_newuserdata(L, sizeof(lp_Glob));
+    lp_Glob *g = (luaL_argcheck(L, vec_len(S->p.parts) > 1,
+                1, "Unacceptable pattern: ''"),
+            lua_newuserdata(L, sizeof(lp_Glob)));
     memset(g, 0, sizeof(*g));
     if (luaL_newmetatable(L, LP_GLOB_TYPE)) {
         lua_pushcfunction(L, lpL_globclose);

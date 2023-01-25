@@ -78,6 +78,59 @@ All routines may returns `nil, error` for error case. if you want raise error to
 | `fs.binpath()`                        | `string`     | same as `path.bin()`                                         |
 | `fs.is{dir/link/file/mount}`          | `string`     | same as correspond routines in `path` module.                |
 
+#### `fs.dir()`/`fs.scandir()`/`fs.glob()`
+
+These functions will return a iterator that yields  `filename`, `type` pair.  The `type` could be:
+
+- `"file"` a file name
+- `"dir"` a dir the will not walk into it.
+- `"in"` a dir that will walk into it, i.e. the next iteration will yields the content in this folder.
+- `"out"` a dir that completed walk.
+
+If you pass a number argument as the *last* argument of `fs.scandir()`/`fs.glob()`, this number argument will be treat as the limit  of walking. e.g. `fs.scandir("foo", 1)` will walks into all subdirectory/files in `"foo"`, but not contents in subdirectories.
+
+```lua
+-- assume folder "foo" has this struture:
+-- - foo
+--   |- bar
+--      |- bar.txt
+--   |- foo.txt
+-- the code below:
+for fn, ty in fs.scandir("foo", 1) do
+  print(fn, ty)
+end
+-- will prints:
+-- foo in
+-- bar dir
+-- foo.txt file
+-- foo out
+```
+
+`fs.glob()` accepts a path thats contains patterns in it. But patterns in `drive` part will be ignored. e.g. the pattern likes `"*:/foo.txt"` in Windows will yields empty results.
+
+A empty pattern (`""`) is not allowed.
+
+If a pattern contains `"**"`, the `fs.glob()` will walks into all current subdirectories to find a match after `"**"`, e.g. `"**/*.txt"` will yields all `.txt` files in any levels of subdirectories of current folder.
+
+If the pattern ends with `"**"`, all subdirectories, but not files, will returnd.
+
+Some examples:
+
+```lua
+-- assume same struture of folder "foo" above.
+local function collect(pattern) do
+    local t = {}
+    for fn in fs.glob(pattern) do
+      t[#t+1] = fn
+    end
+end
+collect "*.txt"    -- returns {"foo/foo.txt"}
+collect "**/*.txt" -- returns {"foo/foo.txt", "foo/bar/bar.txt"}
+collect "**"       -- returns {"foo/bar"}
+```
+
+
+
 ### `path.env`
 
 | routine               | return value  | description                                                  |
