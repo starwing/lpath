@@ -76,7 +76,7 @@ typedef struct VecHeader { unsigned len, cap; } VecHeader;
 #define VEC_MAX_LEN (~(unsigned)0 - 100)
 
 #define vec_init(A)     ((A) = NULL)
-#define vec_free(A)     (vec_resize(NULL,A,0), vec_init(A))
+#define vec_free(A)     vec_resize(NULL,A,0)
 #define vec_reset(A)    vec_setlen(A,0)
 #define vec_setlen(A,N) ((A) ? vec_rawlen(A) = (unsigned)(N) : 0u)
 
@@ -103,7 +103,7 @@ typedef struct VecHeader { unsigned len, cap; } VecHeader;
 
 static int vec_resize_(lua_State *L, void **pA, unsigned cap, size_t objlen) {
     VecHeader *AI, *oldAI = (assert(pA), vec_hdr(*pA));
-    if (cap == 0) { free(oldAI); vec_init(*pA); return 1; }
+    if (cap == 0) return free(oldAI), vec_init(*pA), 1;
     AI = (VecHeader*)realloc(oldAI, sizeof(VecHeader) + cap*objlen);
     if (AI == NULL) return L ? luaL_error(L, "out of memory") : 0;
     if (!oldAI) AI->cap = AI->len = 0;
@@ -114,8 +114,7 @@ static int vec_resize_(lua_State *L, void **pA, unsigned cap, size_t objlen) {
 }
 
 static int vec_grow_(lua_State *L, void **pA, unsigned len, size_t objlen) {
-    unsigned cap = vec_cap(*pA);
-    unsigned exp = vec_len(*pA) + len;
+    unsigned cap = vec_cap(*pA), exp = vec_len(*pA) + len;
     if (cap < exp) {
         unsigned newcap = VEC_MIN_LEN;
         while (newcap < VEC_MAX_LEN/objlen && newcap < exp)
