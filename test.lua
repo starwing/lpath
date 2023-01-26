@@ -959,7 +959,7 @@ function _G.test_dir()
       if state == "dir" then break end
    end
    if info.platform == 'windows' then
-      test_table({'.\\case_1', '.\\case_2'}, fs.dir'.')
+      test_table({'.\\case_1', '.\\case_2', '.\\test.txt'}, fs.dir'.')
    else
       test_table({'./case_1', './case_2', './test.txt'}, fs.dir'.')
    end
@@ -1109,7 +1109,11 @@ function _G.test_glob()
    end)
    check("*.txt", {"top.txt"})
    check("test_glob", {"test_glob"})
-   check("test_glob/", {"test_glob/"})
+   if info.platform == 'windows' then
+      check("test_glob/", {"test_glob\\"})
+   else
+      check("test_glob/", {"test_glob/"})
+   end
    check("top.txt/", {})
    check_count("**", {["in"]=16, out=16})
    check_count("**/*.txt", {file=4})
