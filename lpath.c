@@ -1745,11 +1745,11 @@ static void lpG_init(lp_State *S, lp_Glob *g, int limit) {
     for (s = ps = i; i < e; ++i) {
         if (lp_len(*i) != 2 || i->s[0] != '*' || i->s[1] != '*') continue;
         if (i == s || i != ps) /* first, or not empty */
-            gl.pat = ps, gl.len = (i-ps), vec_push(L, g->stack, gl);
+            gl.pat = ps, gl.len = (int)(i-ps), vec_push(L, g->stack, gl);
         ps = i + 1; /* ps points to pattern next to '**' */
     }
     if (lp_len(i[-1]) == 0) i -= 1, g->dironly = 1;
-    gl.pat = ps, gl.len = (i-ps), vec_push(L, g->stack, gl);
+    gl.pat = ps, gl.len = (int)(i-ps), vec_push(L, g->stack, gl);
     g->current = (assert(vec_len(g->stack) >= 1), &g->stack[0]);
 }
 
