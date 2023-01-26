@@ -1972,7 +1972,7 @@ static int lp_iterparts(lua_State *L) {
 static int lp_newpartsiter(lua_State *L) {
     lp_Path *p = lua_newuserdata(L, sizeof(lp_Path));
     memset(p, 0, sizeof(*p));
-    if (!luaL_newmetatable(L, LP_PARTS_ITER)) {
+    if (luaL_newmetatable(L, LP_PARTS_ITER)) {
         lua_pushcfunction(L, lp_delparts);
         lua_pushvalue(L, -1);
         lua_setfield(L, -3, "__gc");
@@ -1984,7 +1984,9 @@ static int lp_newpartsiter(lua_State *L) {
     lua_setuservalue(L, -2);
     lua_pushcfunction(L, lp_iterparts);
     lua_insert(L, -2);
-    return 2;
+    lua_pushnil(L);
+    lua_pushvalue(L, -2);
+    return 4;
 }
 
 static int lpL_parts(lua_State *L) {
