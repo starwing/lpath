@@ -66,7 +66,7 @@ static void lua_rawsetp(lua_State *L, int idx, const void *p)
 # define LUAMOD_API LUALIB_API
 #endif
 
-#define LP_VERSION "path 0.3"
+#define LP_VERSION "path 0.4"
 
 /* vector routines */
 
