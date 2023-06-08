@@ -106,8 +106,7 @@ static int vec_resize_(lua_State *L, void **pA, unsigned cap, size_t objlen) {
     if (cap == 0) return free(oldAI), vec_init(*pA), 1;
     AI = (VecHeader*)realloc(oldAI, sizeof(VecHeader) + cap*objlen);
     if (AI == NULL) return L ? luaL_error(L, "out of memory") : 0;
-    if (!oldAI) AI->cap = AI->len = 0;
-    if (AI->cap > cap) AI->cap = cap;
+    if (!oldAI) AI->len = 0;
     AI->cap = cap;
     *pA = (void*)(AI + 1);
     return 1;
